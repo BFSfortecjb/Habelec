@@ -33,26 +33,37 @@ async function ecranStagiaire(cible) {
       <div id="liste-noms"></div>
     </div>`;
 
-  $('#form-code').addEventListener('submit', async ev => {
+  $('#form-code').addEventListener('submit', ev => {
     ev.preventDefault();
-    const code = ev.target.code.value.trim().toUpperCase();
-    try {
-      const liste = await rpc('liste_stagiaires_session', { p_code: code });
-      if (!liste?.length) {
-        return toast('Code inconnu, ou la passation n\'est pas ouverte', 'erreur', 6000);
-      }
-      Q.candidats = liste;
-      $('#liste-noms').innerHTML = `
-        <h2>Qui es-tu ?</h2>
-        <div class="grille-noms">${liste.map(s => `
-          <button class="nom ${s.deja_termine ? 'termine' : ''}"
-                  ${s.deja_termine ? 'disabled' : ''}
-                  onclick="demarrerQcm('${esc(s.jeton)}')">
-            ${esc(s.nom)} ${esc(s.prenom)}
-            ${s.deja_termine ? '<span class="puce">déjà terminé</span>' : ''}
-          </button>`).join('')}</div>`;
-    } catch (e) { erreurSupabase('Recherche de la session', e); }
+    rechercherSessionStagiaire(ev.target.code.value.trim().toUpperCase());
   });
+
+  // Le QR code affiché en salle encode #stagiaire?code=XXXXXX : on saute
+  // la saisie manuelle si le lien arrive déjà avec un code.
+  const codePrerempli = new URLSearchParams(location.hash.split('?')[1] || '').get('code');
+  if (codePrerempli) {
+    $('#form-code').code.value = codePrerempli.toUpperCase();
+    rechercherSessionStagiaire(codePrerempli.toUpperCase());
+  }
+}
+
+async function rechercherSessionStagiaire(code) {
+  try {
+    const liste = await rpc('liste_stagiaires_session', { p_code: code });
+    if (!liste?.length) {
+      return toast('Code inconnu, ou la passation n\'est pas ouverte', 'erreur', 6000);
+    }
+    Q.candidats = liste;
+    $('#liste-noms').innerHTML = `
+      <h2>Qui es-tu ?</h2>
+      <div class="grille-noms">${liste.map(s => `
+        <button class="nom ${s.deja_termine ? 'termine' : ''}"
+                ${s.deja_termine ? 'disabled' : ''}
+                onclick="demarrerQcm('${esc(s.jeton)}')">
+          ${esc(s.nom)} ${esc(s.prenom)}
+          ${s.deja_termine ? '<span class="puce">déjà terminé</span>' : ''}
+        </button>`).join('')}</div>`;
+  } catch (e) { erreurSupabase('Recherche de la session', e); }
 }
 
 /** Avant d'ouvrir le sujet, on s'assure d'avoir les infos nécessaires à

@@ -131,14 +131,15 @@ async function rendreSessions(zone) {
 }
 
 async function nouvelleSession() {
-  const intitule = prompt('Intitulé de la session :', 'Habilitation électrique — ' + new Date().getFullYear());
-  if (!intitule) return;
-  // N° Galaxy obligatoire : on redemande tant que le champ est vide, sauf annulation.
+  // N° Galaxy demandé en premier et obligatoire : c'est la référence
+  // administrative prioritaire, on redemande tant que le champ est vide.
   let numeroGalaxy = null;
   while (numeroGalaxy === null || numeroGalaxy.trim() === '') {
     numeroGalaxy = prompt('N° de session Galaxy (obligatoire) :', numeroGalaxy || '');
     if (numeroGalaxy === null) return; // annulé
   }
+  const intitule = prompt('Intitulé de la session :', 'Habilitation électrique — ' + new Date().getFullYear());
+  if (!intitule) return;
   const code = genererCodeAcces();
   const { error } = await sb.from('sessions_formation').insert({
     organisme_id: S.organisme.id, formateur_id: S.profil.id,
@@ -190,7 +191,9 @@ async function rendreDetailSession(zone) {
     sb.from('v_suivi_session').select('*').eq('session_id', s.id),
   ]);
   const suiviPar = Object.fromEntries((suivi || []).map(x => [x.stagiaire_id, x]));
-  const lienStagiaire = location.origin + location.pathname + '#stagiaire';
+  // Code inclus dans le lien : le QR scanné saute la saisie manuelle du code.
+  const lienStagiaire = location.origin + location.pathname
+    + '#stagiaire?code=' + encodeURIComponent(s.code_acces);
 
   zone.innerHTML = `
     <button class="lien" onclick="retour('sessions')">← Toutes les sessions</button>
@@ -212,6 +215,8 @@ async function rendreDetailSession(zone) {
       <div><b>Code à dicter en salle</b><div class="code-geant">${esc(s.code_acces)}</div></div>
       <div><b>Adresse de passation</b><div><code>${esc(lienStagiaire)}</code></div>
         <button class="lien" onclick="navigator.clipboard.writeText('${esc(lienStagiaire)}');toast('Lien copié')">Copier le lien</button></div>
+      <div><b>QR code</b><div><canvas id="qr-passation"></canvas></div>
+        <button class="lien" onclick="telechargerQrPassation()">Télécharger l'image</button></div>
       <div><b>N° de session Galaxy</b><div>${esc(s.numero_session_galaxy) || '<i>non renseigné</i>'}</div>
         <button class="lien" onclick="modifierNumeroGalaxy()">Modifier</button></div>
       <div><b>Règle de réussite</b>
@@ -236,6 +241,17 @@ async function rendreDetailSession(zone) {
         || '<tr><td colspan="8" class="vide">Aucun stagiaire. Ajoute-les un par un ou importe un fichier Excel.</td></tr>'}
       </tbody>
     </table>`;
+
+  QRCode.toCanvas($('#qr-passation'), lienStagiaire, { width: 140, margin: 1 },
+    err => { if (err) DEBUG.erreur('QR code', err.message); });
+}
+
+function telechargerQrPassation() {
+  const canvas = $('#qr-passation');
+  const lien = document.createElement('a');
+  lien.download = 'qr-passation-' + S.session.code_acces + '.png';
+  lien.href = canvas.toDataURL('image/png');
+  lien.click();
 }
 
 function ligneStagiaire(st, suivi) {
