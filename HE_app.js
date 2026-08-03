@@ -111,11 +111,12 @@ async function rendreSessions(zone) {
       <button class="principal" onclick="nouvelleSession()">+ Nouvelle session</button>
     </div>
     <table class="tableau">
-      <thead><tr><th>Intitulé</th><th>Entreprise</th><th>Début</th><th>Type</th>
+      <thead><tr><th>Intitulé</th><th>N° Galaxy</th><th>Entreprise</th><th>Début</th><th>Type</th>
         <th>Code d'accès</th><th>Statut</th><th>Stagiaires</th><th></th></tr></thead>
       <tbody>${(data || []).map(s => `
         <tr>
           <td><a href="#" onclick="ouvrirSession('${s.id}');return false">${esc(s.intitule)}</a></td>
+          <td>${esc(s.numero_session_galaxy)}</td>
           <td>${esc(s.entreprise)}</td>
           <td>${dateFr(s.date_debut)}</td>
           <td>${s.type_formation === 'recyclage' ? 'Recyclage' : 'Initiale'}</td>
@@ -124,7 +125,7 @@ async function rendreSessions(zone) {
           <td>${s.stagiaires?.[0]?.count ?? 0}</td>
           <td><button class="icone" title="Supprimer la session"
                 onclick="supprimerSession('${s.id}')">🗑</button></td>
-        </tr>`).join('') || '<tr><td colspan="8" class="vide">Aucune session pour le moment.</td></tr>'}
+        </tr>`).join('') || '<tr><td colspan="9" class="vide">Aucune session pour le moment.</td></tr>'}
       </tbody>
     </table>`;
 }
@@ -132,14 +133,29 @@ async function rendreSessions(zone) {
 async function nouvelleSession() {
   const intitule = prompt('Intitulé de la session :', 'Habilitation électrique — ' + new Date().getFullYear());
   if (!intitule) return;
+  // N° Galaxy obligatoire : on redemande tant que le champ est vide, sauf annulation.
+  let numeroGalaxy = null;
+  while (numeroGalaxy === null || numeroGalaxy.trim() === '') {
+    numeroGalaxy = prompt('N° de session Galaxy (obligatoire) :', numeroGalaxy || '');
+    if (numeroGalaxy === null) return; // annulé
+  }
   const code = genererCodeAcces();
   const { error } = await sb.from('sessions_formation').insert({
     organisme_id: S.organisme.id, formateur_id: S.profil.id,
-    intitule, code_acces: code, statut: 'brouillon',
+    intitule, numero_session_galaxy: numeroGalaxy.trim(), code_acces: code, statut: 'brouillon',
   });
   if (error) return erreurSupabase('Création de la session', error);
   toast('Session créée — code d\'accès ' + code);
   rendreSessions($('#contenu'));
+}
+
+async function modifierNumeroGalaxy() {
+  const numeroGalaxy = prompt('N° de session Galaxy :', S.session.numero_session_galaxy || '');
+  if (numeroGalaxy === null || numeroGalaxy.trim() === '') return;
+  const { error } = await sb.from('sessions_formation')
+    .update({ numero_session_galaxy: numeroGalaxy.trim() }).eq('id', S.session.id);
+  if (error) return erreurSupabase('Modification du n° Galaxy', error);
+  await ouvrirSession(S.session.id);
 }
 
 function genererCodeAcces() {
@@ -183,8 +199,12 @@ async function rendreDetailSession(zone) {
       <div>
         <button onclick="ouvrirParametresSession()" title="Paramètres de l'évaluation">⚙ Paramètres</button>
         <button onclick="genererTousLesQcm()" title="Générer un sujet par stagiaire">🎲 Générer les QCM</button>
-        <button class="principal" onclick="basculerOuverture()">
-          ${s.statut === 'ouverte' ? '⏸ Fermer la passation' : '▶ Ouvrir la passation'}</button>
+        ${s.statut !== 'cloturee' ? `<button class="principal" onclick="basculerOuverture()">
+          ${s.statut === 'ouverte' ? '⏸ Fermer la passation' : '▶ Ouvrir la passation'}</button>` : ''}
+        ${s.statut !== 'cloturee'
+          ? `<button title="Supprime les infos personnelles des stagiaires (sauf nom/prénom), une fois tous les titres/avis générés"
+                onclick="cloturerSession()">🔒 Clôturer la session</button>`
+          : '<span class="etat cloturee">🔒 Session clôturée</span>'}
       </div>
     </div>
 
@@ -192,6 +212,8 @@ async function rendreDetailSession(zone) {
       <div><b>Code à dicter en salle</b><div class="code-geant">${esc(s.code_acces)}</div></div>
       <div><b>Adresse de passation</b><div><code>${esc(lienStagiaire)}</code></div>
         <button class="lien" onclick="navigator.clipboard.writeText('${esc(lienStagiaire)}');toast('Lien copié')">Copier le lien</button></div>
+      <div><b>N° de session Galaxy</b><div>${esc(s.numero_session_galaxy) || '<i>non renseigné</i>'}</div>
+        <button class="lien" onclick="modifierNumeroGalaxy()">Modifier</button></div>
       <div><b>Règle de réussite</b>
         <div>${Math.round(s.seuil_global * 100)} % de bonnes réponses
           ${s.exiger_fondamentales ? '<br>+ 100 % des questions fondamentales' : ''}</div></div>
@@ -255,6 +277,21 @@ async function basculerOuverture() {
   S.session.statut = nouveau;
   toast(nouveau === 'ouverte' ? 'Passation ouverte' : 'Passation fermée');
   rendreDetailSession($('#contenu'));
+}
+
+/** Purge les infos personnelles des stagiaires (sauf nom/prénom). Irréversible :
+ *  refusé côté base tant qu'un avis est encore en attente pour un stagiaire. */
+async function cloturerSession() {
+  if (!confirmer('Clôturer définitivement cette session ?\n'
+    + 'Toutes les infos personnelles des stagiaires (date de naissance, entreprise, '
+    + 'coordonnées...) seront supprimées, sauf nom et prénom. Action irréversible.')) return;
+  try {
+    await rpc('cloturer_session', { p_session_id: S.session.id });
+    toast('Session clôturée');
+    await ouvrirSession(S.session.id);
+  } catch (e) {
+    erreurSupabase('Clôture de la session', e);
+  }
 }
 
 async function ouvrirParametresSession() {

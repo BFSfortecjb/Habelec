@@ -13,6 +13,8 @@ const Q = {
   index: 0,
   finLe: null,     // horodatage de fin si la session est chronométrée
   minuteur: null,
+  candidats: [],   // liste renvoyée par liste_stagiaires_session, pour retrouver
+                    // date_naissance/entreprise sans un second aller-retour serveur
 };
 
 async function ecranStagiaire(cible) {
@@ -39,6 +41,7 @@ async function ecranStagiaire(cible) {
       if (!liste?.length) {
         return toast('Code inconnu, ou la passation n\'est pas ouverte', 'erreur', 6000);
       }
+      Q.candidats = liste;
       $('#liste-noms').innerHTML = `
         <h2>Qui es-tu ?</h2>
         <div class="grille-noms">${liste.map(s => `
@@ -52,7 +55,50 @@ async function ecranStagiaire(cible) {
   });
 }
 
-async function demarrerQcm(jeton) {
+/** Avant d'ouvrir le sujet, on s'assure d'avoir les infos nécessaires à
+ *  l'avis et à la carte d'habilitation (absentes de l'import Excel formateur).
+ *  Si l'une manque, on les demande au stagiaire avant de continuer. */
+function demarrerQcm(jeton) {
+  const candidat = Q.candidats.find(s => s.jeton === jeton);
+  if (candidat && (!candidat.date_naissance || !candidat.entreprise)) {
+    return rendreFormulaireInfos($('#ecran'), jeton, candidat);
+  }
+  demarrerQcmSuite(jeton);
+}
+
+function rendreFormulaireInfos(cible, jeton, candidat) {
+  cible.innerHTML = `
+    <div class="stagiaire-accueil">
+      <h1>${esc(candidat.nom)} ${esc(candidat.prenom)}</h1>
+      <p class="sous-titre">Quelques informations sont nécessaires pour l'avis et
+        la carte d'habilitation, avant de commencer le questionnaire.</p>
+      <form id="form-infos" class="carte">
+        <label>Date de naissance
+          <input name="date_naissance" type="date" required
+                 value="${esc(candidat.date_naissance || '')}"></label>
+        <label>Entreprise
+          <input name="entreprise" type="text" required autocomplete="off"
+                 value="${esc(candidat.entreprise || '')}"></label>
+        <button class="principal" type="submit">Continuer</button>
+      </form>
+    </div>`;
+  $('#form-infos').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const f = ev.target;
+    try {
+      await rpc('completer_infos_stagiaire', {
+        p_jeton: jeton,
+        p_date_naissance: f.date_naissance.value,
+        p_entreprise: f.entreprise.value.trim(),
+      });
+      candidat.date_naissance = f.date_naissance.value;
+      candidat.entreprise = f.entreprise.value.trim();
+      demarrerQcmSuite(jeton);
+    } catch (e) { erreurSupabase('Enregistrement des informations', e); }
+  });
+}
+
+async function demarrerQcmSuite(jeton) {
   try {
     const sujet = await rpc('sujet_stagiaire', { p_jeton: jeton });
     Q.jeton = jeton;
