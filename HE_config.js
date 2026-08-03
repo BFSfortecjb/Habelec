@@ -12,8 +12,8 @@
    ===================================================================== */
 
 const CONFIG = {
-  SUPABASE_URL: 'https://VOTRE-PROJET.supabase.co',
-  SUPABASE_ANON_KEY: 'VOTRE_CLE_ANON',
+  SUPABASE_URL: 'https://dqraobwozowtnrieitkp.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_UhkImOyooXPnAqTCNMJ4wA_VVqscCmK',
 
   // Schéma Postgres dédié à Habelec dans le projet Supabase partagé Univers BFS.
   // Ne jamais mettre 'public' : c'est la règle commune Univers BFS (chaque appli
