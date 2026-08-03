@@ -215,7 +215,8 @@ async function rendreDetailSession(zone) {
       <div><b>Code à dicter en salle</b><div class="code-geant">${esc(s.code_acces)}</div></div>
       <div><b>Adresse de passation</b><div><code>${esc(lienStagiaire)}</code></div>
         <button class="lien" onclick="navigator.clipboard.writeText('${esc(lienStagiaire)}');toast('Lien copié')">Copier le lien</button></div>
-      <div><b>QR code</b><div><canvas id="qr-passation"></canvas></div>
+      <div><b>QR code</b><div><canvas id="qr-passation" width="140" height="140"></canvas>
+        <p id="qr-erreur" class="erreur-discrete" hidden></p></div>
         <button class="lien" onclick="telechargerQrPassation()">Télécharger l'image</button></div>
       <div><b>N° de session Galaxy</b><div>${esc(s.numero_session_galaxy) || '<i>non renseigné</i>'}</div>
         <button class="lien" onclick="modifierNumeroGalaxy()">Modifier</button></div>
@@ -242,8 +243,21 @@ async function rendreDetailSession(zone) {
       </tbody>
     </table>`;
 
-  QRCode.toCanvas($('#qr-passation'), lienStagiaire, { width: 140, margin: 1 },
-    err => { if (err) DEBUG.erreur('QR code', err.message); });
+  // La bibliothèque QRCode vient d'un CDN (voir index.html) : si elle n'a pas
+  // pu charger (réseau, bloqueur de scripts...), on l'affiche clairement au
+  // lieu de laisser un carré vide sans explication.
+  try {
+    if (typeof QRCode === 'undefined') throw new Error('bibliothèque QRCode non chargée');
+    QRCode.toCanvas($('#qr-passation'), lienStagiaire, { width: 140, margin: 1 }, err => {
+      if (err) afficherErreurQr(err.message);
+    });
+  } catch (e) { afficherErreurQr(e.message); }
+}
+
+function afficherErreurQr(message) {
+  DEBUG.erreur('QR code', message);
+  const p = $('#qr-erreur');
+  if (p) { p.hidden = false; p.textContent = 'QR code indisponible (' + message + ')'; }
 }
 
 function telechargerQrPassation() {
