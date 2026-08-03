@@ -34,7 +34,7 @@ function ecranConnexion(cible) {
         </label>
         <button class="principal" type="submit">Se connecter</button>
         <p class="aide">Les stagiaires n'ont pas de compte : ils utilisent le
-           <a href="#stagiaire">lien de passation</a> et le code affiché en salle.</p>
+           <a href="#stagiaire">lien de connexion stagiaire</a> et le code affiché en salle.</p>
       </form>
     </div>`;
 
@@ -203,7 +203,7 @@ async function rendreDetailSession(zone) {
         <button onclick="ouvrirParametresSession()" title="Paramètres de l'évaluation">⚙ Paramètres</button>
         <button onclick="genererTousLesQcm()" title="Générer un sujet par stagiaire">🎲 Générer les QCM</button>
         ${s.statut !== 'cloturee' ? `<button class="principal" onclick="basculerOuverture()">
-          ${s.statut === 'ouverte' ? '⏸ Fermer la passation' : '▶ Ouvrir la passation'}</button>` : ''}
+          ${s.statut === 'ouverte' ? '⏸ Fermer l\'accès stagiaires' : '▶ Ouvrir l\'accès stagiaires'}</button>` : ''}
         ${s.statut !== 'cloturee'
           ? `<button title="Supprime les infos personnelles des stagiaires (sauf nom/prénom), une fois tous les titres/avis générés"
                 onclick="cloturerSession()">🔒 Clôturer la session</button>`
@@ -213,10 +213,10 @@ async function rendreDetailSession(zone) {
 
     <div class="carte info-passation">
       <div><b>Code à dicter en salle</b><div class="code-geant">${esc(s.code_acces)}</div></div>
-      <div><b>Adresse de passation</b><div><code>${esc(lienStagiaire)}</code></div>
+      <div><b>Adresse de connexion stagiaires</b><div><code>${esc(lienStagiaire)}</code></div>
         <button class="lien" onclick="navigator.clipboard.writeText('${esc(lienStagiaire)}');toast('Lien copié')">Copier le lien</button></div>
-      <div><b>QR code</b><div><canvas id="qr-passation" width="140" height="140"></canvas>
-        <p id="qr-erreur" class="erreur-discrete" hidden></p></div>
+      <div><b>QR code</b><div id="qr-passation"></div>
+        <p id="qr-erreur" class="erreur-discrete" hidden></p>
         <button class="lien" onclick="telechargerQrPassation()">Télécharger l'image</button></div>
       <div><b>N° de session Galaxy</b><div>${esc(s.numero_session_galaxy) || '<i>non renseigné</i>'}</div>
         <button class="lien" onclick="modifierNumeroGalaxy()">Modifier</button></div>
@@ -245,12 +245,13 @@ async function rendreDetailSession(zone) {
 
   // La bibliothèque QRCode vient d'un CDN (voir index.html) : si elle n'a pas
   // pu charger (réseau, bloqueur de scripts...), on l'affiche clairement au
-  // lieu de laisser un carré vide sans explication.
+  // lieu de laisser un carré vide sans explication. Cette bibliothèque dessine
+  // elle-même (canvas ou <img> selon le navigateur) dans le conteneur fourni,
+  // sans callback : toute erreur est donc synchrone.
   try {
     if (typeof QRCode === 'undefined') throw new Error('bibliothèque QRCode non chargée');
-    QRCode.toCanvas($('#qr-passation'), lienStagiaire, { width: 140, margin: 1 }, err => {
-      if (err) afficherErreurQr(err.message);
-    });
+    $('#qr-passation').innerHTML = '';
+    new QRCode($('#qr-passation'), { text: lienStagiaire, width: 140, height: 140 });
   } catch (e) { afficherErreurQr(e.message); }
 }
 
@@ -261,10 +262,13 @@ function afficherErreurQr(message) {
 }
 
 function telechargerQrPassation() {
-  const canvas = $('#qr-passation');
+  const conteneur = $('#qr-passation');
+  // Selon le navigateur, la bibliothèque dessine soit un <canvas>, soit un <img>.
+  const source = conteneur?.querySelector('canvas') || conteneur?.querySelector('img');
+  if (!source) return toast('QR code indisponible', 'erreur');
   const lien = document.createElement('a');
   lien.download = 'qr-passation-' + S.session.code_acces + '.png';
-  lien.href = canvas.toDataURL('image/png');
+  lien.href = source.tagName === 'CANVAS' ? source.toDataURL('image/png') : source.src;
   lien.click();
 }
 
@@ -305,7 +309,7 @@ async function basculerOuverture() {
     .update({ statut: nouveau }).eq('id', S.session.id);
   if (error) return erreurSupabase('Changement de statut', error);
   S.session.statut = nouveau;
-  toast(nouveau === 'ouverte' ? 'Passation ouverte' : 'Passation fermée');
+  toast(nouveau === 'ouverte' ? 'Accès stagiaires ouvert' : 'Accès stagiaires fermé');
   rendreDetailSession($('#contenu'));
 }
 
