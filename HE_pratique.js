@@ -8,6 +8,13 @@
      D = erreur grave (comportement dangereux)
    Critère d'acceptation : aucun D et un seul C au maximum pour chaque
    mise en situation. La grille est celle des tableaux D.2 à D.12.
+
+   Validation du titre (2026-08) : chaque gabarit définit un nombre de mises
+   en situation obligatoires (par défaut 1) et un nombre de rattrapage (par
+   défaut 1), réglables par titre depuis l'onglet admin « Titres ». Le
+   rattrapage n'est utile qu'en cas d'échec des obligatoires ; le titre est
+   validé dès qu'une mise en situation obligatoire OU de rattrapage est
+   conforme. Logique dupliquée côté SQL dans epreuve_pratique_conforme().
    ===================================================================== */
 
 const NOTES = {
@@ -35,7 +42,8 @@ async function rendrePratique(zone) {
   catch (e) { return erreurSupabase('Préparation des épreuves pratiques', e); }
 
   const { data: epreuves, error } = await sb.from('epreuves_pratiques')
-    .select(`*, gabarits(libelle, mises_en_situation_min, tableau_savoir_faire, competences),
+    .select(`*, gabarits(libelle, mises_en_situation_min, mises_en_situation_rattrapage,
+               tableau_savoir_faire, competences),
              mises_en_situation(id, numero, intitule, commentaire, scenario_id,
                evaluations_savoir_faire(id, note, commentaire,
                  gabarit_savoir_faire(id, position, libelle)))`)
@@ -59,6 +67,14 @@ async function rendrePratique(zone) {
 
 function carteEpreuve(ep, scenarios) {
   const dispo = scenarios.filter(s => s.gabarit_code === ep.gabarit_code);
+  const min = ep.gabarits.mises_en_situation_min;
+  const rattrapage = ep.gabarits.mises_en_situation_rattrapage || 0;
+  const mises = ep.mises_en_situation || [];
+  const obligatoires = mises.filter(m => m.numero <= min);
+  const obligatoiresConformes = obligatoires.length === min &&
+    obligatoires.every(m => miseConforme(m));
+  const total = mises.length;
+  const peutAjouter = total < min + rattrapage;
   return `
     <section class="carte epreuve">
       <div class="entete-epreuve">
@@ -68,14 +84,16 @@ function carteEpreuve(ep, scenarios) {
       </div>
       <p class="aide">Compétences à évaluer :
         ${(ep.gabarits.competences || []).map(c => `<span class="puce">${esc(c)}</span>`).join(' ')}
-        · ${ep.gabarits.mises_en_situation_min} mise(s) en situation minimum</p>
+        · ${min} mise(s) en situation obligatoire(s)${rattrapage
+          ? ` + ${rattrapage} de rattrapage si échec` : ''}</p>
 
-      ${(ep.mises_en_situation || []).sort((a, b) => a.numero - b.numero)
-        .map(m => grilleMise(m, dispo)).join('')}
+      ${mises.sort((a, b) => a.numero - b.numero)
+        .map(m => grilleMise(m, dispo, m.numero <= min)).join('')}
 
       <div class="pied-epreuve">
-        <button class="lien" onclick="ajouterMise('${ep.id}', ${(ep.mises_en_situation || []).length + 1}, '${ep.gabarit_code}')">
-          + Ajouter une mise en situation</button>
+        ${peutAjouter ? `<button class="lien" onclick="ajouterMise('${ep.id}', ${total + 1}, '${ep.gabarit_code}')">
+          + Ajouter une mise en situation${total >= min ? ' de rattrapage' : ''}</button>`
+          : `<span class="aide">Nombre maximal de mises en situation atteint (${min + rattrapage}).</span>`}
         <label class="plein">Observations générales
           <textarea rows="2" onchange="majObservations('${ep.id}', this.value)">${esc(ep.observations)}</textarea></label>
         <button class="principal" onclick="cloturerEpreuve('${ep.id}')">Valider cette épreuve</button>
@@ -83,7 +101,15 @@ function carteEpreuve(ep, scenarios) {
     </section>`;
 }
 
-function grilleMise(m, scenarios) {
+function miseConforme(m) {
+  const lignes = m.evaluations_savoir_faire || [];
+  const nbC = lignes.filter(l => l.note === 'C').length;
+  const nbD = lignes.filter(l => l.note === 'D').length;
+  const complet = lignes.length > 0 && lignes.every(l => l.note);
+  return complet && nbD === 0 && nbC <= 1;
+}
+
+function grilleMise(m, scenarios, obligatoire) {
   const lignes = (m.evaluations_savoir_faire || [])
     .sort((a, b) => a.gabarit_savoir_faire.position - b.gabarit_savoir_faire.position);
   const nbC = lignes.filter(l => l.note === 'C').length;
@@ -94,7 +120,7 @@ function grilleMise(m, scenarios) {
   return `
     <div class="mise ${complet ? (conforme ? 'conforme' : 'non-conforme') : ''}">
       <div class="entete-mise">
-        <b>Mise en situation ${m.numero}</b>
+        <b>Mise en situation ${m.numero} <span class="puce">${obligatoire ? 'obligatoire' : 'rattrapage'}</span></b>
         <select onchange="appliquerScenario('${m.id}', this.value)">
           <option value="">— scénario libre —</option>
           ${scenarios.map(s => `<option value="${s.id}" ${s.id === m.scenario_id ? 'selected' : ''}>

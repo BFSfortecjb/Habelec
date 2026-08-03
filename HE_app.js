@@ -55,13 +55,17 @@ const ONGLETS = {
   sessions:  'Sessions',
   banque:    'Banque de questions',
   scenarios: 'Mises en situation',
+  titres:    'Titres',
   organisme: 'Organisme',
 };
 
+// Onglets réservés à l'administrateur (réglages qui touchent tous les organismes
+// ou tous les stagiaires, pas seulement l'organisme courant)
+const ONGLETS_ADMIN = new Set(['titres', 'organisme']);
+
 function ongletsVisibles() {
   const liste = Object.entries(ONGLETS);
-  // L'onglet Organisme n'est utile qu'à l'administrateur
-  return S.vision === 'admin' ? liste : liste.filter(([id]) => id !== 'organisme');
+  return S.vision === 'admin' ? liste : liste.filter(([id]) => !ONGLETS_ADMIN.has(id));
 }
 
 const RENDU = {
@@ -69,6 +73,7 @@ const RENDU = {
   session:   rendreDetailSession,
   banque:    rendreBanque,
   scenarios: rendreScenarios,
+  titres:    rendreTitres,
   organisme: rendreOrganisme,
   pratique:  rendrePratique,     // défini dans HE_pratique.js
 };
@@ -846,6 +851,42 @@ async function rendreScenarios(zone) {
 }
 
 /* ============ 8. Onglet Organisme =================================== */
+/* ---------------- Onglet Titres (admin) : réglage des MSP par titre ---- */
+async function rendreTitres(zone) {
+  const gabarits = [...(S.referentiel.gabarits || [])].sort((a, b) => a.code.localeCompare(b.code));
+  zone.innerHTML = `
+    <div class="barre-actions"><h2>Titres — mises en situation pratiques</h2></div>
+    <p class="aide">Par défaut, chaque titre demande <b>1 mise en situation obligatoire</b> ;
+       si elle échoue, <b>1 mise en situation de rattrapage</b> est proposée. Le titre est
+       validé dès que l'une des deux (obligatoire ou rattrapage) est conforme. Ces deux
+       nombres sont réglables ici, par titre.</p>
+    <table class="tableau">
+      <thead><tr><th>Titre</th><th>MSP obligatoire(s)</th><th>MSP de rattrapage</th><th></th></tr></thead>
+      <tbody>${gabarits.map(g => `
+        <tr data-gabarit="${esc(g.code)}">
+          <td>${esc(g.libelle)}</td>
+          <td><input type="number" min="1" max="9" style="width:4em"
+                value="${g.mises_en_situation_min}" data-champ="mises_en_situation_min"></td>
+          <td><input type="number" min="0" max="9" style="width:4em"
+                value="${g.mises_en_situation_rattrapage}" data-champ="mises_en_situation_rattrapage"></td>
+          <td><button class="lien" onclick="enregistrerTitre('${esc(g.code)}')">Enregistrer</button></td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+}
+
+async function enregistrerTitre(code) {
+  const ligne = document.querySelector(`tr[data-gabarit="${CSS.escape(code)}"]`);
+  const min = parseInt(ligne.querySelector('[data-champ=mises_en_situation_min]').value, 10);
+  const rattrapage = parseInt(ligne.querySelector('[data-champ=mises_en_situation_rattrapage]').value, 10);
+  if (!min || min < 1) return toast('Il faut au moins 1 mise en situation obligatoire', 'erreur');
+  const { error } = await sb.from('gabarits')
+    .update({ mises_en_situation_min: min, mises_en_situation_rattrapage: rattrapage || 0 })
+    .eq('code', code);
+  if (error) return erreurSupabase('Enregistrement du titre', error);
+  toast('Titre enregistré');
+  await chargerReferentiel();
+}
+
 async function rendreOrganisme(zone) {
   const o = S.organisme || {};
   zone.innerHTML = `
