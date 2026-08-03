@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BFS Habelec — Évaluation NF C18-510</title>
+<meta name="theme-color" content="#f3ab12">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="ecran"></div>
+<div id="toasts"></div>
+<div id="debug-panel" hidden></div>
+
+<!-- Bibliothèques externes (CDN) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<!-- Application (ordre de chargement important) -->
+<script src="HE_config.js"></script>
+<script src="HE_debug.js"></script>
+<script src="HE_core.js"></script>
+<script src="HE_qcm.js"></script>
+<script src="HE_pratique.js"></script>
+<script src="HE_pdf.js"></script>
+<script src="HE_app.js"></script>
+<script>document.addEventListener('DOMContentLoaded', demarrer);</script>
+
+</body>
+</html>
