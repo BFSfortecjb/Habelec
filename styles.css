@@ -137,6 +137,8 @@ button.icone:hover { background: var(--gris-fond); border-radius: 6px; }
 .etat.ok, .etat.ouverte { background: var(--vert-fond); color: var(--vert); font-weight: 700; }
 .etat.ko { background: var(--rouge-fond); color: var(--rouge); font-weight: 700; }
 .etat.encours { background: var(--jaune-fond); color: var(--jaune-fonce); font-weight: 600; }
+/* Titre dont la théorie a échoué : pratique optionnelle, pas "à faire" comme .ko */
+.etat.avertissement { background: var(--jaune-fond); color: var(--jaune-fonce); font-weight: 600; }
 .puce {
   display: inline-block; background: var(--gris-fond); color: var(--gris);
   padding: 1px 8px; border-radius: 20px; font-size: 12px; margin: 1px 2px;
@@ -144,6 +146,14 @@ button.icone:hover { background: var(--gris-fond); border-radius: 6px; }
 /* Question fondamentale : son échec invalide le titre — signal fort */
 .puce.fond { background: var(--rouge-fond); color: var(--rouge); font-weight: 700; }
 .puce.alerte { background: var(--jaune-fond); color: var(--jaune-fonce); font-weight: 600; }
+
+/* Statut de validation d'un titre visé, dans la liste des stagiaires :
+   gris (par défaut) = non évalué, vert clair = théorie validée (pratique en
+   attente), vert foncé = théorie + pratique validées, rouge = théorie non
+   validée (la pratique de ce titre devient sans objet, sauf rattrapage). */
+.puce.titre-vert-clair { background: var(--vert-fond); color: var(--vert); font-weight: 600; }
+.puce.titre-vert-fonce { background: var(--vert); color: #fff; font-weight: 700; }
+.puce.titre-rouge { background: var(--rouge-fond); color: var(--rouge); font-weight: 700; }
 
 .aide { color: var(--gris-doux); font-size: 13.5px; }
 .chargement { color: var(--gris-doux); font-style: italic; }

@@ -196,6 +196,17 @@ async function rendreDetailSession(zone) {
     sb.from('v_suivi_session').select('*').eq('session_id', s.id),
   ]);
   const suiviPar = Object.fromEntries((suivi || []).map(x => [x.stagiaire_id, x]));
+
+  // Statut par titre visé (gris/vert clair/vert foncé/rouge sur les puces) : nécessite
+  // resultats_symbole, calculé après correction théorie et/ou clôture pratique.
+  const idsStagiaires = (stagiaires || []).map(st => st.id);
+  const { data: resultats } = idsStagiaires.length
+    ? await sb.from('resultats_symbole').select('*').in('stagiaire_id', idsStagiaires)
+    : { data: [] };
+  const resultatsParStagiaire = {};
+  (resultats || []).forEach(r => {
+    (resultatsParStagiaire[r.stagiaire_id] ||= {})[r.symbole_code] = r;
+  });
   // Code inclus dans le lien : le QR scanné saute la saisie manuelle du code.
   const lienStagiaire = location.origin + location.pathname
     + '#stagiaire?code=' + encodeURIComponent(s.code_acces);
@@ -243,7 +254,8 @@ async function rendreDetailSession(zone) {
     <table class="tableau">
       <thead><tr><th>Nom</th><th>Prénom</th><th>Fonction</th><th>Titres visés</th>
         <th>Domaines</th><th>Théorie</th><th>Pratique</th><th>Actions</th></tr></thead>
-      <tbody>${(stagiaires || []).map(st => ligneStagiaire(st, suiviPar[st.id])).join('')
+      <tbody>${(stagiaires || []).map(st =>
+        ligneStagiaire(st, suiviPar[st.id], resultatsParStagiaire[st.id] || {})).join('')
         || '<tr><td colspan="8" class="vide">Aucun stagiaire. Ajoute-les un par un ou importe un fichier Excel.</td></tr>'}
       </tbody>
     </table>`;
@@ -277,8 +289,22 @@ function telechargerQrPassation() {
   lien.click();
 }
 
-function ligneStagiaire(st, suivi) {
-  const symb = (st.stagiaire_symboles || []).map(x => libelleSymbole(x.symbole_code));
+// Couleur d'une puce « titre visé » selon resultats_symbole :
+//  - pas de ligne (jamais calculé)     -> gris (défaut, pas de classe)
+//  - theorie_ok === false              -> rouge : théorie non validée
+//  - theorie_ok === true, pratique_ok  -> vert foncé : titre validé
+//  - theorie_ok === true, sinon        -> vert clair : théorie validée, pratique en attente
+function classeTitre(resultat) {
+  if (!resultat || resultat.theorie_ok === null) return '';
+  if (resultat.theorie_ok === false) return 'titre-rouge';
+  return resultat.pratique_ok ? 'titre-vert-fonce' : 'titre-vert-clair';
+}
+
+function ligneStagiaire(st, suivi, resultatsSymboles) {
+  const symb = (st.stagiaire_symboles || []).map(x => ({
+    code: x.symbole_code, libelle: libelleSymbole(x.symbole_code),
+    classe: classeTitre((resultatsSymboles || {})[x.symbole_code]),
+  }));
   let theorie = '<span class="etat neutre">à générer</span>';
   if (suivi?.statut_theorie === 'corrigee') {
     theorie = `<span class="etat ${suivi.theorie_reussie ? 'ok' : 'ko'}">`
@@ -296,7 +322,10 @@ function ligneStagiaire(st, suivi) {
 
   return `<tr>
     <td>${esc(st.nom)}</td><td>${esc(st.prenom)}</td><td>${esc(st.fonction)}</td>
-    <td>${symb.map(x => `<span class="puce">${esc(x)}</span>`).join(' ') || '<i>aucun</i>'}</td>
+    <td>${symb.map(x => `<span class="puce ${x.classe}" title="${x.classe === 'titre-rouge' ? 'Théorie non validée' :
+        x.classe === 'titre-vert-fonce' ? 'Titre validé (théorie + pratique)' :
+        x.classe === 'titre-vert-clair' ? 'Théorie validée, pratique en attente' : 'Non évalué'}">${esc(x.libelle)}</span>`)
+      .join(' ') || '<i>aucun</i>'}</td>
     <td>${(st.domaines || []).join(', ')}</td>
     <td>${theorie}</td><td>${prat}</td>
     <td class="actions">

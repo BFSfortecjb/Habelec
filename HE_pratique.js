@@ -46,12 +46,22 @@ async function rendrePratique(zone) {
                tableau_savoir_faire, competences),
              mises_en_situation(id, numero, intitule, commentaire, scenario_id,
                evaluations_savoir_faire(id, note, commentaire,
-                 gabarit_savoir_faire(id, position, libelle)))`)
+                 gabarit_savoir_faire(id, position, code, libelle)))`)
     .eq('stagiaire_id', st.id).order('gabarit_code');
   if (error) return erreurSupabase('Lecture des épreuves pratiques', error);
 
   const { data: scenarios } = await sb.from('scenarios_pratiques')
     .select('*').eq('actif', true);
+
+  // Un titre dont la théorie a échoué n'a plus besoin d'être évalué en pratique
+  // (sauf rattrapage théorique à venir) : la carte du titre passe en orange
+  // plutôt qu'en rouge, pour signaler « optionnel » et non « à faire ».
+  const { data: resultats } = await sb.from('resultats_symbole')
+    .select('symbole_code, theorie_ok').eq('stagiaire_id', st.id);
+  const theorieOkParSymbole = Object.fromEntries((resultats || []).map(r => [r.symbole_code, r.theorie_ok]));
+  const symbolesStagiaire = (st.stagiaire_symboles || []).map(x => x.symbole_code);
+  const theorieEchoueePourGabarit = gabaritCode => symbolesStagiaire.some(sym =>
+    (S.referentiel.gabaritsParSymbole[sym] || []).includes(gabaritCode) && theorieOkParSymbole[sym] === false);
 
   zone.innerHTML = `
     <button class="lien" onclick="retour('session')">← Retour à la session</button>
@@ -62,10 +72,10 @@ async function rendrePratique(zone) {
     <p class="aide">Barème normatif : <b>A</b> sans erreur · <b>B</b> erreur minime ·
        <b>C</b> erreur majeure · <b>D</b> erreur grave.
        Critère d'acceptation : <b>aucun D et un seul C au maximum par mise en situation</b>.</p>
-    ${(epreuves || []).map(ep => carteEpreuve(ep, scenarios || [])).join('')}`;
+    ${(epreuves || []).map(ep => carteEpreuve(ep, scenarios || [], theorieEchoueePourGabarit(ep.gabarit_code))).join('')}`;
 }
 
-function carteEpreuve(ep, scenarios) {
+function carteEpreuve(ep, scenarios, theorieEchouee) {
   const dispo = scenarios.filter(s => s.gabarit_code === ep.gabarit_code);
   const min = ep.gabarits.mises_en_situation_min;
   const rattrapage = ep.gabarits.mises_en_situation_rattrapage || 0;
@@ -75,12 +85,16 @@ function carteEpreuve(ep, scenarios) {
     obligatoires.every(m => miseConforme(m));
   const total = mises.length;
   const peutAjouter = total < min + rattrapage;
+  const badgeOrange = theorieEchouee && ep.reussie !== true;
   return `
     <section class="carte epreuve">
       <div class="entete-epreuve">
         <h3>${esc(ep.gabarits.libelle)}</h3>
-        <span class="etat ${ep.reussie === true ? 'ok' : ep.reussie === false ? 'ko' : 'neutre'}">
-          ${ep.reussie === true ? 'Validée' : ep.reussie === false ? 'Non validée' : 'En cours'}</span>
+        ${badgeOrange
+          ? `<span class="etat avertissement" title="La théorie de ce titre a échoué : la pratique n'est pas nécessaire, sauf si un rattrapage théorique est prévu.">
+              ⚠ Théorie non validée — pratique optionnelle</span>`
+          : `<span class="etat ${ep.reussie === true ? 'ok' : ep.reussie === false ? 'ko' : 'neutre'}">
+              ${ep.reussie === true ? 'Validée' : ep.reussie === false ? 'Non validée' : 'En cours'}</span>`}
       </div>
       <p class="aide">Compétences à évaluer :
         ${(ep.gabarits.competences || []).map(c => `<span class="puce">${esc(c)}</span>`).join(' ')}
@@ -136,7 +150,7 @@ function grilleMise(m, scenarios, obligatoire) {
           <th>Commentaire</th></tr></thead>
         <tbody>${lignes.map(l => `
           <tr>
-            <td>${l.gabarit_savoir_faire.position}) ${esc(l.gabarit_savoir_faire.libelle)}</td>
+            <td><span class="puce">${esc(l.gabarit_savoir_faire.code)}</span> ${esc(l.gabarit_savoir_faire.libelle)}</td>
             ${Object.keys(NOTES).map(n => `<td class="case-note ${n}">
               <input type="radio" name="n-${l.id}" value="${n}" ${l.note === n ? 'checked' : ''}
                 title="${esc(NOTES[n])}" onchange="noter('${l.id}', '${n}')"></td>`).join('')}
