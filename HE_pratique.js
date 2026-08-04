@@ -35,7 +35,14 @@ async function ouvrirPratique(stagiaireId) {
 
 async function rendrePratique(zone) {
   const st = S.stagiaire;
-  zone.innerHTML = '<p class="chargement">Préparation des grilles…</p>';
+  // Ré-affichage après une note/un commentaire (grille déjà à l'écran) : on garde le
+  // contenu existant pendant le rechargement au lieu de tout effacer, et on restaure
+  // la position de scroll à la fin — sans quoi la page remontait en haut à chaque
+  // clic sur une note (le "trou" du message de chargement fait perdre le repère
+  // au navigateur). Seul le tout premier chargement affiche le message d'attente.
+  const dejaAffiche = !!zone.querySelector('.epreuve');
+  const scrollY = window.scrollY;
+  if (!dejaAffiche) zone.innerHTML = '<p class="chargement">Préparation des grilles…</p>';
 
   // Crée les épreuves manquantes (une par gabarit visé) et pré-remplit les grilles
   try { await rpc('preparer_pratiques', { p_stagiaire_id: st.id }); }
@@ -73,6 +80,8 @@ async function rendrePratique(zone) {
        <b>C</b> erreur majeure · <b>D</b> erreur grave.
        Critère d'acceptation : <b>aucun D et un seul C au maximum par mise en situation</b>.</p>
     ${(epreuves || []).map(ep => carteEpreuve(ep, scenarios || [], theorieEchoueePourGabarit(ep.gabarit_code))).join('')}`;
+
+  if (dejaAffiche) window.scrollTo(0, scrollY);
 }
 
 function carteEpreuve(ep, scenarios, theorieEchouee) {
@@ -101,7 +110,11 @@ function carteEpreuve(ep, scenarios, theorieEchouee) {
         · ${min} mise(s) en situation obligatoire(s)${rattrapage
           ? ` + ${rattrapage} de rattrapage si échec` : ''}</p>
 
-      ${mises.sort((a, b) => a.numero - b.numero)
+      ${[...mises]
+        // Les mises « à faire » remontent en haut, les « faites » (grille complète,
+        // conforme ou non) descendent en bas — à numéro de mise égal on garde
+        // l'ordre chronologique. Rejoue automatiquement si une note est modifiée.
+        .sort((a, b) => (miseComplete(a) - miseComplete(b)) || (a.numero - b.numero))
         .map(m => grilleMise(m, dispo, m.numero <= min)).join('')}
 
       <div class="pied-epreuve">
@@ -115,16 +128,28 @@ function carteEpreuve(ep, scenarios, theorieEchouee) {
     </section>`;
 }
 
+// Filtre défensif : une ligne evaluations_savoir_faire dont le gabarit_savoir_faire
+// pointé a disparu (résidu d'une migration du référentiel non nettoyé) ne doit pas
+// planter tout l'écran pratique — on l'ignore à l'affichage plutôt que de crasher.
+const ligneValide = l => !!l.gabarit_savoir_faire;
+
+// Toutes les lignes de la grille ont-elles une note ? (indépendant du verdict
+// conforme/non conforme — sert à trier les mises « à faire » avant les « faites ».)
+function miseComplete(m) {
+  const lignes = (m.evaluations_savoir_faire || []).filter(ligneValide);
+  return lignes.length > 0 && lignes.every(l => l.note);
+}
+
 function miseConforme(m) {
-  const lignes = m.evaluations_savoir_faire || [];
+  const lignes = (m.evaluations_savoir_faire || []).filter(ligneValide);
   const nbC = lignes.filter(l => l.note === 'C').length;
   const nbD = lignes.filter(l => l.note === 'D').length;
-  const complet = lignes.length > 0 && lignes.every(l => l.note);
-  return complet && nbD === 0 && nbC <= 1;
+  return miseComplete(m) && nbD === 0 && nbC <= 1;
 }
 
 function grilleMise(m, scenarios, obligatoire) {
-  const lignes = (m.evaluations_savoir_faire || [])
+  const orphelines = (m.evaluations_savoir_faire || []).filter(l => !ligneValide(l)).length;
+  const lignes = (m.evaluations_savoir_faire || []).filter(ligneValide)
     .sort((a, b) => a.gabarit_savoir_faire.position - b.gabarit_savoir_faire.position);
   const nbC = lignes.filter(l => l.note === 'C').length;
   const nbD = lignes.filter(l => l.note === 'D').length;
@@ -143,6 +168,8 @@ function grilleMise(m, scenarios, obligatoire) {
         <span class="verdict">${complet
           ? (conforme ? '✔ conforme' : `✘ non conforme (${nbD} D, ${nbC} C)`)
           : 'à compléter'}</span>
+        ${orphelines ? `<span class="etat avertissement" title="Critères obsolètes (référentiel modifié après la création de cette mise en situation) : recrée la mise en situation pour repartir sur la grille à jour.">
+          ⚠ ${orphelines} critère(s) obsolète(s) ignoré(s)</span>` : ''}
       </div>
       <table class="tableau grille">
         <thead><tr><th>Savoir-faire évalué</th>
