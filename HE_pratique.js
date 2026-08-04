@@ -79,7 +79,12 @@ async function rendrePratique(zone) {
     <p class="aide">Barème normatif : <b>A</b> sans erreur · <b>B</b> erreur minime ·
        <b>C</b> erreur majeure · <b>D</b> erreur grave.
        Critère d'acceptation : <b>aucun D et un seul C au maximum par mise en situation</b>.</p>
-    ${(epreuves || []).map(ep => carteEpreuve(ep, scenarios || [], theorieEchoueePourGabarit(ep.gabarit_code))).join('')}`;
+    ${[...(epreuves || [])]
+      // Même logique que pour les mises en situation à l'intérieur d'un titre :
+      // les épreuves encore à faire remontent en haut, les titres déjà validés
+      // descendent en bas — à égalité on garde l'ordre alphabétique du gabarit.
+      .sort((a, b) => ((a.reussie === true) - (b.reussie === true)) || a.gabarit_code.localeCompare(b.gabarit_code))
+      .map(ep => carteEpreuve(ep, scenarios || [], theorieEchoueePourGabarit(ep.gabarit_code))).join('')}`;
 
   if (dejaAffiche) window.scrollTo(0, scrollY);
 }
