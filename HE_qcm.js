@@ -51,7 +51,7 @@ async function rechercherSessionStagiaire(code) {
   try {
     const liste = await rpc('liste_stagiaires_session', { p_code: code });
     if (!liste?.length) {
-      return toast('Code inconnu, ou la passation n\'est pas ouverte', 'erreur', 6000);
+      return toast('Code inconnu, ou l\'accès n\'est pas encore ouvert', 'erreur', 6000);
     }
     Q.candidats = liste;
     $('#liste-noms').innerHTML = `
@@ -154,8 +154,9 @@ function rendreQuestion(cible) {
       <footer class="pied-passation">
         <button ${Q.index === 0 ? 'disabled' : ''} onclick="naviguerQcm(-1)">← Précédente</button>
         <div class="pastilles">${qs.map((x, i) => `
-          <button class="pastille ${i === Q.index ? 'actif' : ''} ${(x.reponse_donnee || []).length ? 'faite' : ''}"
-            title="Question ${i + 1}" onclick="allerQuestion(${i})">${i + 1}</button>`).join('')}</div>
+          <button class="pastille ${i === Q.index ? 'actif' : ''} ${(x.reponse_donnee || []).length ? 'faite' : ''} ${x.enregistrement === 'erreur' ? 'erreur' : ''}"
+            title="Question ${i + 1}${x.enregistrement === 'erreur' ? ' — non enregistrée, réessaie' : ''}"
+            onclick="allerQuestion(${i})">${i + 1}</button>`).join('')}</div>
         ${Q.index === qs.length - 1
           ? `<button class="principal" onclick="terminerQcm()">Terminer</button>`
           : `<button onclick="naviguerQcm(1)">Suivante →</button>`}
@@ -173,14 +174,49 @@ async function enregistrerReponseCourante() {
   // Mise à jour visuelle immédiate, enregistrement en arrière-plan
   $$('.proposition').forEach(p =>
     p.classList.toggle('choisie', p.querySelector('input').checked));
-  try {
-    await rpc('enregistrer_reponse', {
-      p_jeton: Q.jeton, p_epreuve_question_id: q.id, p_reponses: choix,
-    });
-  } catch (e) {
-    toast('Réponse non enregistrée, vérifie la connexion', 'erreur');
-    DEBUG.erreur('enregistrer_reponse', e.message);
+  q.enregistrement = 'en_cours';
+  await enregistrerAvecReprise(q, choix);
+  // La pastille reflète le statut réel (faite / erreur) : on ne redessine que la barre
+  // de progression et les pastilles, sans perdre la place sur la question courante.
+  rafraichirBarreEtPastilles();
+}
+
+/** Tente d'enregistrer une réponse côté serveur, avec 3 essais (courte pause entre
+ *  chaque). Marque q.enregistrement = 'ok' ou 'erreur' selon le résultat final —
+ *  c'est ce statut, pas seulement la présence d'une réponse locale, qui doit être
+ *  vérifié avant de laisser le stagiaire terminer son épreuve. */
+async function enregistrerAvecReprise(q, choix, tentatives = 3) {
+  for (let essai = 1; essai <= tentatives; essai++) {
+    try {
+      await rpc('enregistrer_reponse', {
+        p_jeton: Q.jeton, p_epreuve_question_id: q.id, p_reponses: choix,
+      });
+      q.enregistrement = 'ok';
+      return true;
+    } catch (e) {
+      DEBUG.erreur('enregistrer_reponse (essai ' + essai + '/' + tentatives + ')', e.message);
+      if (essai < tentatives) await new Promise(r => setTimeout(r, 700 * essai));
+    }
   }
+  q.enregistrement = 'erreur';
+  toast('Réponse non enregistrée, vérifie ta connexion', 'erreur');
+  return false;
+}
+
+function rafraichirBarreEtPastilles() {
+  const qs = Q.sujet.questions;
+  const repondues = qs.filter(x => (x.reponse_donnee || []).length > 0).length;
+  const jauge = document.querySelector('.jauge div');
+  const compteur = document.querySelector('.progression span');
+  if (jauge) jauge.style.width = (repondues / qs.length) * 100 + '%';
+  if (compteur) compteur.textContent = `${repondues}/${qs.length} répondues`;
+  const pastilles = $$('.pastille');
+  qs.forEach((x, i) => {
+    const b = pastilles[i];
+    if (!b) return;
+    b.classList.toggle('faite', (x.reponse_donnee || []).length > 0);
+    b.classList.toggle('erreur', x.enregistrement === 'erreur');
+  });
 }
 
 function naviguerQcm(pas) { allerQuestion(Q.index + pas); }
@@ -195,7 +231,57 @@ async function terminerQcm() {
   const restantes = Q.sujet.questions.filter(x => !(x.reponse_donnee || []).length).length;
   if (restantes && !confirmer(
     `${restantes} question(s) sans réponse.\nTerminer quand même ?`)) return;
+
+  const bouton = document.querySelector('.pied-passation .principal');
+  if (bouton) { bouton.disabled = true; bouton.textContent = 'Vérification des réponses…'; }
+  const ok = await verifierEnregistrements();
+  if (!ok) {
+    if (bouton) { bouton.disabled = false; bouton.textContent = 'Terminer'; }
+    toast('Certaines réponses n\'ont pas pu être confirmées enregistrées '
+      + '(connexion instable). Repère les questions en rouge, revois-les, '
+      + 'puis réessaie de terminer.', 'erreur', 8000);
+    return;
+  }
   await finaliserQcm();
+}
+
+/** Avant de clore l'épreuve : réessaie les réponses en échec local, PUIS revérifie
+ *  auprès du serveur (source de vérité) que chaque réponse locale correspond bien
+ *  à ce qui est enregistré côté base — un enregistrement peut avoir semblé réussir
+ *  côté client tout en échouant côté réseau juste après. Retourne false s'il reste
+ *  un écart après tentative de correction : on bloque alors la fin d'épreuve plutôt
+ *  que de risquer une copie incomplète silencieuse. */
+async function verifierEnregistrements() {
+  const aReprendre = Q.sujet.questions.filter(q =>
+    (q.reponse_donnee || []).length > 0 && q.enregistrement !== 'ok');
+  for (const q of aReprendre) {
+    await enregistrerAvecReprise(q, q.reponse_donnee);
+  }
+  rafraichirBarreEtPastilles();
+
+  let sujetServeur;
+  try {
+    sujetServeur = await rpc('sujet_stagiaire', { p_jeton: Q.jeton });
+  } catch (e) {
+    DEBUG.erreur('verifierEnregistrements — relecture serveur', e.message);
+    return false; // impossible de vérifier => on ne prend pas le risque de conclure
+  }
+  const serveurParId = Object.fromEntries(sujetServeur.questions.map(x => [x.id, x.reponse_donnee || []]));
+  const memes = (a, b) => a.length === b.length && a.every(v => b.includes(v));
+
+  let toutOk = true;
+  Q.sujet.questions.forEach(q => {
+    const local = q.reponse_donnee || [];
+    const distant = serveurParId[q.id] || [];
+    if (!memes(local, distant)) {
+      q.enregistrement = 'erreur';
+      toutOk = false;
+    } else if (local.length > 0) {
+      q.enregistrement = 'ok';
+    }
+  });
+  rafraichirBarreEtPastilles();
+  return toutOk;
 }
 
 async function finaliserQcm() {
