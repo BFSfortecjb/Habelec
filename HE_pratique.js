@@ -90,10 +90,23 @@ function carteEpreuve(ep, scenarios, theorieEchouee) {
   const rattrapage = ep.gabarits.mises_en_situation_rattrapage || 0;
   const mises = ep.mises_en_situation || [];
   const obligatoires = mises.filter(m => m.numero <= min);
-  const obligatoiresConformes = obligatoires.length === min &&
-    obligatoires.every(m => miseConforme(m));
+  const obligatoiresCompletes = obligatoires.length === min &&
+    obligatoires.every(m => miseComplete(m));
+  const obligatoiresConformes = obligatoiresCompletes && obligatoires.every(m => miseConforme(m));
+  const obligatoiresEchouees = obligatoiresCompletes && !obligatoiresConformes;
   const total = mises.length;
-  const peutAjouter = total < min + rattrapage;
+
+  // Le rattrapage n'a de sens qu'après échec des obligatoires : tant que ce n'est
+  // pas le cas, on masque les mises de rattrapage encore vides (créées par erreur
+  // ou par anticipation) pour ne pas encombrer l'écran d'une grille inutile. Une
+  // mise de rattrapage déjà notée reste affichée même si les obligatoires finissent
+  // par être conformes (traçabilité de ce qui a été fait).
+  const rattrapagesExistants = mises.filter(m => m.numero > min);
+  const rattrapagesAffiches = rattrapagesExistants.filter(m =>
+    obligatoiresEchouees || (m.evaluations_savoir_faire || []).some(l => l.note));
+  const misesAffichees = [...obligatoires, ...rattrapagesAffiches];
+
+  const peutAjouter = total < min || (obligatoiresEchouees && total < min + rattrapage);
   const badgeOrange = theorieEchouee && ep.reussie !== true;
   return `
     <section class="carte epreuve">
@@ -110,7 +123,7 @@ function carteEpreuve(ep, scenarios, theorieEchouee) {
         · ${min} mise(s) en situation obligatoire(s)${rattrapage
           ? ` + ${rattrapage} de rattrapage si échec` : ''}</p>
 
-      ${[...mises]
+      ${[...misesAffichees]
         // Les mises « à faire » remontent en haut, les « faites » (grille complète,
         // conforme ou non) descendent en bas — à numéro de mise égal on garde
         // l'ordre chronologique. Rejoue automatiquement si une note est modifiée.
@@ -120,7 +133,11 @@ function carteEpreuve(ep, scenarios, theorieEchouee) {
       <div class="pied-epreuve">
         ${peutAjouter ? `<button class="lien" onclick="ajouterMise('${ep.id}', ${total + 1}, '${ep.gabarit_code}')">
           + Ajouter une mise en situation${total >= min ? ' de rattrapage' : ''}</button>`
-          : `<span class="aide">Nombre maximal de mises en situation atteint (${min + rattrapage}).</span>`}
+          : obligatoiresConformes && rattrapage
+            ? `<span class="aide">Mise(s) en situation obligatoire(s) conforme(s) — rattrapage non nécessaire.</span>`
+          : !obligatoiresCompletes
+            ? ''
+            : `<span class="aide">Nombre maximal de mises en situation atteint (${min + rattrapage}).</span>`}
         <label class="plein">Observations générales
           <textarea rows="2" onchange="majObservations('${ep.id}', this.value)">${esc(ep.observations)}</textarea></label>
         <button class="principal" onclick="cloturerEpreuve('${ep.id}')">Valider cette épreuve</button>
