@@ -962,9 +962,11 @@ async function editerQuestion(id) {
       const { error } = await sb.from('question_reponses')
         .insert(reponses.map(r => ({ ...r, question_id: qid })));
       if (error) throw error;
-      fermerModale();
       toast('Question enregistrée');
+      // On reste sur la liste de la thématique (plutôt que de revenir au tableau
+      // général de la banque) : plus ergonomique pour relire/classer en série.
       rendreBanque($('#contenu'));
+      await listerQuestions(donnees.theme_code);
     } catch (e) { erreurSupabase('Enregistrement de la question', e); }
   });
 }
@@ -1123,23 +1125,114 @@ async function rendreScenarios(zone) {
 async function rendreTitres(zone) {
   const gabarits = [...(S.referentiel.gabarits || [])].sort((a, b) => a.code.localeCompare(b.code));
   zone.innerHTML = `
-    <div class="barre-actions"><h2>Titres — mises en situation pratiques</h2></div>
+    <div class="barre-actions"><h2>Titres — mises en situation pratiques</h2>
+      <button onclick="gererCatalogueCriteres()">📋 Catalogue des critères (E1-E15 / NE1-NE12)</button>
+    </div>
     <p class="aide">Par défaut, chaque titre demande <b>1 mise en situation obligatoire</b> ;
        si elle échoue, <b>1 mise en situation de rattrapage</b> est proposée. Le titre est
        validé dès que l'une des deux (obligatoire ou rattrapage) est conforme. Ces deux
        nombres sont réglables ici, par titre.</p>
     <table class="tableau">
-      <thead><tr><th>Titre</th><th>MSP obligatoire(s)</th><th>MSP de rattrapage</th><th></th></tr></thead>
-      <tbody>${gabarits.map(g => `
+      <thead><tr><th>Titre</th><th>MSP obligatoire(s)</th><th>MSP de rattrapage</th><th>Critères évalués</th><th></th></tr></thead>
+      <tbody>${gabarits.map(g => {
+        const n = (S.referentiel.savoirFaire || []).filter(sf => sf.gabarit_code === g.code).length;
+        const total = (S.referentiel.criteres || []).filter(c => c.famille === g.famille).length;
+        return `
         <tr data-gabarit="${esc(g.code)}">
           <td>${esc(g.libelle)}</td>
           <td><input type="number" min="1" max="9" style="width:4em"
                 value="${g.mises_en_situation_min}" data-champ="mises_en_situation_min"></td>
           <td><input type="number" min="0" max="9" style="width:4em"
                 value="${g.mises_en_situation_rattrapage}" data-champ="mises_en_situation_rattrapage"></td>
+          <td>${n}/${total} <button class="lien" onclick="gererCriteresGabarit('${esc(g.code)}')">Gérer</button></td>
           <td><button class="lien" onclick="enregistrerTitre('${esc(g.code)}')">Enregistrer</button></td>
-        </tr>`).join('')}</tbody>
+        </tr>`;
+      }).join('')}</tbody>
     </table>`;
+}
+
+/* ---------- Critères pratiques par titre (2026-08) ---------------------
+ * gabarit_savoir_faire est un sous-ensemble éditable du catalogue national
+ * criteres_savoir_faire (E1..E15 / NE1..NE12) : quels critères comptent
+ * réellement pour CE titre, réglable ici plutôt que figé dans le code. */
+async function gererCriteresGabarit(gabaritCode) {
+  const g = S.referentiel.gabarits.find(x => x.code === gabaritCode);
+  const catalogue = (S.referentiel.criteres || []).filter(c => c.famille === g.famille)
+    .sort((a, b) => a.numero - b.numero);
+  const retenus = new Set((S.referentiel.savoirFaire || [])
+    .filter(sf => sf.gabarit_code === gabaritCode).map(sf => sf.critere_code));
+
+  ouvrirModale(`Critères pratiques — ${esc(g.libelle)}`, `
+    <p class="aide">Coche les critères réellement évalués pour ce titre. Les autres
+       critères du catalogue ${g.famille === 'elec' ? 'élec (E1-E15)' : 'non élec (NE1-NE12)'}
+       ne seront pas proposés dans la grille de notation.</p>
+    <form id="form-criteres-gabarit">
+      ${catalogue.map(c => `<label class="case">
+        <input type="checkbox" value="${esc(c.code)}" ${retenus.has(c.code) ? 'checked' : ''}>
+        <span class="puce">${esc(c.code)}</span> ${esc(c.libelle)}</label>`).join('')}
+      <div class="pied-modale">
+        <button type="button" onclick="fermerModale()">Annuler</button>
+        <button type="submit" class="principal">Enregistrer</button>
+      </div>
+    </form>`);
+
+  $('#form-criteres-gabarit').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const codes = $$('#form-criteres-gabarit input:checked').map(i => i.value);
+    if (!codes.length) return toast('Il faut garder au moins un critère', 'erreur');
+    try {
+      await sb.from('gabarit_savoir_faire').delete().eq('gabarit_code', gabaritCode);
+      const { error } = await sb.from('gabarit_savoir_faire').insert(
+        codes.map(code => ({
+          gabarit_code: gabaritCode, critere_code: code,
+          position: catalogue.find(c => c.code === code).numero,
+        })));
+      if (error) throw error;
+      fermerModale();
+      toast('Critères mis à jour pour ce titre');
+      await chargerReferentiel();
+      rendreTitres($('#contenu'));
+    } catch (e) { erreurSupabase('Enregistrement des critères', e); }
+  });
+}
+
+async function gererCatalogueCriteres() {
+  const parFamille = { elec: [], non_elec: [] };
+  (S.referentiel.criteres || []).forEach(c => parFamille[c.famille]?.push(c));
+  Object.values(parFamille).forEach(l => l.sort((a, b) => a.numero - b.numero));
+
+  ouvrirModale('Catalogue des critères pratiques', `
+    <p class="aide">Ce catalogue est national (2 listes fixes : élec E1-E15, non élec NE1-NE12).
+       Modifier un libellé ici le change partout où ce critère est utilisé.</p>
+    <form id="form-catalogue">
+      ${['elec', 'non_elec'].map(fam => `
+        <fieldset><legend>${fam === 'elec' ? 'Électricien (E1-E15)' : 'Non électricien (NE1-NE12)'}</legend>
+          ${parFamille[fam].map(c => `<label style="display:block;margin:6px 0">
+            <span class="puce">${esc(c.code)}</span>
+            <input type="text" style="width:80%" value="${esc(c.libelle)}" data-code="${esc(c.code)}"></label>`).join('')}
+        </fieldset>`).join('')}
+      <div class="pied-modale">
+        <button type="button" onclick="fermerModale()">Annuler</button>
+        <button type="submit" class="principal">Enregistrer</button>
+      </div>
+    </form>`);
+
+  $('#form-catalogue').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    try {
+      for (const input of $$('#form-catalogue input[data-code]')) {
+        const libelle = input.value.trim();
+        if (!libelle) continue;
+        const { error } = await sb.from('criteres_savoir_faire')
+          .update({ libelle }).eq('code', input.dataset.code);
+        if (error) throw error;
+      }
+      fermerModale();
+      toast('Catalogue mis à jour');
+      await chargerReferentiel();
+      rendreTitres($('#contenu'));
+    } catch (e) { erreurSupabase('Enregistrement du catalogue', e); }
+  });
 }
 
 async function enregistrerTitre(code) {

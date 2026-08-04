@@ -46,7 +46,7 @@ async function rendrePratique(zone) {
                tableau_savoir_faire, competences),
              mises_en_situation(id, numero, intitule, commentaire, scenario_id,
                evaluations_savoir_faire(id, note, commentaire,
-                 gabarit_savoir_faire(id, position, code, libelle)))`)
+                 gabarit_savoir_faire(id, position, criteres_savoir_faire(code, libelle))))`)
     .eq('stagiaire_id', st.id).order('gabarit_code');
   if (error) return erreurSupabase('Lecture des épreuves pratiques', error);
 
@@ -150,7 +150,7 @@ function grilleMise(m, scenarios, obligatoire) {
           <th>Commentaire</th></tr></thead>
         <tbody>${lignes.map(l => `
           <tr>
-            <td><span class="puce">${esc(l.gabarit_savoir_faire.code)}</span> ${esc(l.gabarit_savoir_faire.libelle)}</td>
+            <td><span class="puce">${esc(l.gabarit_savoir_faire.criteres_savoir_faire.code)}</span> ${esc(l.gabarit_savoir_faire.criteres_savoir_faire.libelle)}</td>
             ${Object.keys(NOTES).map(n => `<td class="case-note ${n}">
               <input type="radio" name="n-${l.id}" value="${n}" ${l.note === n ? 'checked' : ''}
                 title="${esc(NOTES[n])}" onchange="noter('${l.id}', '${n}')"></td>`).join('')}

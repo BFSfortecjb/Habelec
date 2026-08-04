@@ -21,7 +21,7 @@ const S = {
   session: null,          // session de formation ouverte dans l'écran de suivi
   stagiaire: null,        // stagiaire en cours d'évaluation pratique
   referentiel: {          // référentiel normatif chargé une fois
-    themes: [], gabarits: [], symboles: [], lignesTitre: [], savoirFaire: [],
+    themes: [], gabarits: [], symboles: [], lignesTitre: [], savoirFaire: [], criteres: [],
   },
   qcm: null,              // sujet en cours côté stagiaire
 };
@@ -224,12 +224,13 @@ async function chargerProfil() {
 
 /* -------------------------- référentiel ---------------------------- */
 async function chargerReferentiel() {
-  const [themes, gabarits, symboles, lignes, sf, quotas, liens] = await Promise.all([
+  const [themes, gabarits, symboles, lignes, sf, criteres, quotas, liens] = await Promise.all([
     sb.from('themes').select('*').order('ordre_affichage'),
     sb.from('gabarits').select('*').order('code'),
     sb.from('symboles').select('*').eq('actif', true).order('ordre_affichage'),
     sb.from('lignes_titre').select('*').order('ordre_affichage'),
-    sb.from('gabarit_savoir_faire').select('*').order('position'),
+    sb.from('gabarit_savoir_faire').select('*, criteres_savoir_faire(code, famille, numero, libelle)').order('position'),
+    sb.from('criteres_savoir_faire').select('*').order('famille').order('numero'),
     sb.from('gabarit_quotas').select('*'),
     sb.from('symbole_gabarits').select('*'),
   ]);
@@ -241,7 +242,10 @@ async function chargerReferentiel() {
   S.referentiel = {
     themes: themes.data || [], gabarits: gabarits.data || [],
     symboles: symboles.data || [], lignesTitre: lignes.data || [],
-    savoirFaire: sf.data || [], quotas: quotas.data || [], gabaritsParSymbole,
+    // savoirFaire : lignes gabarit_savoir_faire (une par critère RETENU pour ce titre),
+    // criteres : catalogue national complet (E1..E15 / NE1..NE12), pour l'admin
+    savoirFaire: sf.data || [], criteres: criteres.data || [],
+    quotas: quotas.data || [], gabaritsParSymbole,
   };
   DEBUG.info('Référentiel chargé', {
     themes: S.referentiel.themes.length,
