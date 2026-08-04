@@ -620,8 +620,12 @@ async function voirCopie(stagiaireId) {
   const gabaritsVises = ep.gabarits || [];
   const verdictsParTitre = ep.statut === 'corrigee' || ep.statut === 'terminee'
     ? Object.fromEntries(await Promise.all(gabaritsVises.map(async g =>
-        [g, await rpc('theorie_gabarit_ok', { p_epreuve_id: ep.id, p_gabarit_code: g }).catch(() => null)])))
+        [g, await rpc('theorie_gabarit_ok', { p_epreuve_id: ep.id, p_gabarit_code: g })
+          .catch(e => { DEBUG.erreur('theorie_gabarit_ok — ' + g, e.message); return null; })])))
     : {};
+  if (ep.statut !== 'corrigee' && ep.statut !== 'terminee') {
+    DEBUG.info('voirCopie — détail par titre non calculé, statut de l\'épreuve : ' + ep.statut);
+  }
   // Pour chaque titre visé, les thèmes qui comptent dans son quota (tronc commun compris)
   const themesParTitre = Object.fromEntries(gabaritsVises.map(g =>
     [g, new Set(S.referentiel.quotas.filter(q => q.gabarit_code === g && q.nb > 0).map(q => q.theme_code))]));
