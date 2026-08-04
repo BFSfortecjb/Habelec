@@ -242,6 +242,8 @@ async function rendreDetailSession(zone) {
           ${s.exiger_fondamentales ? '<br>+ 100 % des questions fondamentales' : ''}</div></div>
     </div>
 
+    ${tableauBordGroupe(stagiaires, resultatsParStagiaire)}
+
     <div class="barre-actions">
       <h3>Stagiaires (${(stagiaires || []).length})</h3>
       <div>
@@ -299,6 +301,47 @@ function classeTitre(resultat) {
   if (!resultat || resultat.theorie_ok === null) return '';
   if (resultat.theorie_ok === false) return 'titre-rouge';
   return resultat.pratique_ok ? 'titre-vert-fonce' : 'titre-vert-clair';
+}
+
+/* --------- Tableau de bord formateur : validation des titres du groupe (2026-08) ---------
+ * Vue d'ensemble en tête de session — évite de parcourir stagiaire par stagiaire pour
+ * savoir où en est le groupe sur chaque titre visé. Purement dérivé des mêmes données
+ * que les puces par stagiaire (resultatsParStagiaire) : aucune requête supplémentaire. */
+function tableauBordGroupe(stagiaires, resultatsParStagiaire) {
+  const parTitre = {};
+  (stagiaires || []).forEach(st => {
+    (st.stagiaire_symboles || []).forEach(x => {
+      const code = x.symbole_code;
+      const c = (parTitre[code] ||= { total: 0, valides: 0, pratiqueAttente: 0, theorieKo: 0, nonEvalues: 0 });
+      c.total++;
+      switch (classeTitre((resultatsParStagiaire[st.id] || {})[code])) {
+        case 'titre-vert-fonce': c.valides++; break;
+        case 'titre-vert-clair': c.pratiqueAttente++; break;
+        case 'titre-rouge': c.theorieKo++; break;
+        default: c.nonEvalues++;
+      }
+    });
+  });
+  const titres = Object.entries(parTitre).sort((a, b) => a[0].localeCompare(b[0]));
+  if (!titres.length) return '';
+
+  return `
+    <div class="carte tableau-bord-groupe">
+      <h3>Tableau de bord — validation des titres du groupe</h3>
+      <table class="tableau compact">
+        <thead><tr><th>Titre</th><th>Stagiaires</th><th>Validés</th>
+          <th>Théorie OK, pratique en attente</th><th>Théorie non validée</th><th>Non évalués</th></tr></thead>
+        <tbody>${titres.map(([code, c]) => `
+          <tr>
+            <td><b>${esc(libelleSymbole(code))}</b></td>
+            <td>${c.total}</td>
+            <td>${c.valides ? `<span class="etat ok">${c.valides}</span>` : '—'}</td>
+            <td>${c.pratiqueAttente ? `<span class="etat encours">${c.pratiqueAttente}</span>` : '—'}</td>
+            <td>${c.theorieKo ? `<span class="etat ko">${c.theorieKo}</span>` : '—'}</td>
+            <td>${c.nonEvalues || '—'}</td>
+          </tr>`).join('')}</tbody>
+      </table>
+    </div>`;
 }
 
 function ligneStagiaire(st, suivi, resultatsSymboles) {
