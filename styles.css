@@ -209,6 +209,10 @@ label.case input { width: auto; margin: 0; accent-color: var(--jaune); }
 .bilan { padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 15px; }
 .bilan.ok { background: var(--vert-fond); color: var(--vert); border-left: 4px solid var(--vert); }
 .bilan.ko { background: var(--rouge-fond); color: var(--rouge); border-left: 4px solid var(--rouge); }
+.detail-titres { margin-bottom: 16px; }
+.detail-titres b { display: block; margin-bottom: 6px; color: var(--gris); font-size: 13px; }
+.detail-titres ul { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 10px; }
+.detail-titres li { font-size: 13.5px; color: var(--gris); display: flex; align-items: center; gap: 5px; }
 ol.copie { padding-left: 22px; }
 ol.copie > li { margin-bottom: 14px; }
 ol.copie > li.faux .enonce { color: var(--rouge); }
@@ -307,6 +311,22 @@ details h4 { margin-top: 14px; font-size: 13px; color: var(--gris-doux); }
 .pastille { width: 30px; height: 30px; padding: 0; font-size: 12px; border-radius: 6px; }
 .pastille.faite { background: var(--jaune-fond); border-color: var(--jaune-bord); }
 .pastille.actif { background: var(--jaune); color: var(--noir); border-color: var(--jaune-fonce); font-weight: 700; }
+/* Réponse pas confirmée enregistrée côté serveur malgré les tentatives */
+.pastille.erreur { background: var(--rouge-fond); border: 2px solid var(--rouge); color: var(--rouge); font-weight: 700; }
+
+/* Recorrection formateur (2026-08) */
+.actions-recorrection { display: flex; gap: 14px; margin: 4px 0 2px; }
+.recorrection { background: var(--gris-fond); border: 1px solid var(--gris-bord); border-radius: 6px;
+  padding: 10px 12px; margin: 6px 0 10px; }
+.recorrection .case { display: block; margin: 4px 0; }
+.recorrection .aide.alerte { color: var(--jaune-fonce); }
+.recorrection .principal { margin-top: 8px; }
+
+/* Images de questions (2026-08) */
+.vignette-question { display: block; max-width: 320px; max-height: 220px; margin: 8px 0;
+  border-radius: 6px; border: 1px solid var(--gris-bord); object-fit: contain; }
+.vignette-question-qcm { display: block; max-width: 100%; max-height: 320px; margin: 0 0 14px;
+  border-radius: 8px; border: 1px solid var(--gris-bord); object-fit: contain; }
 
 /* ----------------------------- toasts ------------------------------ */
 #toasts { position: fixed; bottom: 20px; right: 20px; z-index: 200; display: grid; gap: 8px; }
