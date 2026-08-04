@@ -325,9 +325,14 @@ function tableauBordGroupe(stagiaires, resultatsParStagiaire) {
   const titres = Object.entries(parTitre).sort((a, b) => a[0].localeCompare(b[0]));
   if (!titres.length) return '';
 
+  // Réductible : encore expérimental (« à voir à l'usage »), donc pas question de
+  // l'imposer en permanence — le formateur replie/déplie via <summary>, et le choix
+  // est mémorisé (localStorage) pour ne pas avoir à le refaire à chaque session.
+  const ouvert = localStorage.getItem('he_tableau_bord_ouvert') !== 'false';
   return `
-    <div class="carte tableau-bord-groupe">
-      <h3>Tableau de bord — validation des titres du groupe</h3>
+    <details class="carte tableau-bord-groupe" ${ouvert ? 'open' : ''}
+      ontoggle="localStorage.setItem('he_tableau_bord_ouvert', this.open)">
+      <summary><b>Tableau de bord — validation des titres du groupe</b></summary>
       <table class="tableau compact">
         <thead><tr><th>Titre</th><th>Stagiaires</th><th>Validés</th>
           <th>Théorie OK, pratique en attente</th><th>Théorie non validée</th><th>Non évalués</th></tr></thead>
@@ -341,7 +346,7 @@ function tableauBordGroupe(stagiaires, resultatsParStagiaire) {
             <td>${c.nonEvalues || '—'}</td>
           </tr>`).join('')}</tbody>
       </table>
-    </div>`;
+    </details>`;
 }
 
 function ligneStagiaire(st, suivi, resultatsSymboles) {
