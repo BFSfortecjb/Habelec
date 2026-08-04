@@ -128,7 +128,7 @@ function grilleMise(m, scenarios, obligatoire) {
     .sort((a, b) => a.gabarit_savoir_faire.position - b.gabarit_savoir_faire.position);
   const nbC = lignes.filter(l => l.note === 'C').length;
   const nbD = lignes.filter(l => l.note === 'D').length;
-  const complet = lignes.every(l => l.note);
+  const complet = lignes.length > 0 && lignes.every(l => l.note);
   const conforme = complet && nbD === 0 && nbC <= 1;
 
   return `
