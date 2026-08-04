@@ -218,6 +218,7 @@ async function rendreDetailSession(zone) {
       <div>
         <button onclick="ouvrirParametresSession()" title="Paramètres de l'évaluation">⚙ Paramètres</button>
         <button onclick="genererTousLesQcm()" title="Générer un sujet par stagiaire">🎲 Générer les QCM</button>
+        <button onclick="voirJournalSession('${s.id}')" title="Historique des interventions manuelles du formateur">🗂 Journal</button>
         ${s.statut !== 'cloturee' ? `<button class="principal" onclick="basculerOuverture()">
           ${s.statut === 'ouverte' ? '⏸ Fermer l\'accès stagiaires' : '▶ Ouvrir l\'accès stagiaires'}</button>` : ''}
         ${s.statut !== 'cloturee'
@@ -520,14 +521,110 @@ async function supprimerStagiaire(id) {
 }
 
 /* ------------------- copie corrigée d'un stagiaire ----------------- */
+// État d'édition (en mémoire, réinitialisé à chaque ouverture de modale) :
+// quelles lignes sont actuellement ouvertes en saisie manuelle / en
+// correction de clé. Permet de re-rendre voirCopie() sans perdre le mode
+// édition en cours.
+const EDITION_COPIE = { reponses: new Set(), cles: new Set() };
+
+function toggleReponseFormateur(epreuveQuestionId, stagiaireId) {
+  EDITION_COPIE.reponses.has(epreuveQuestionId)
+    ? EDITION_COPIE.reponses.delete(epreuveQuestionId) : EDITION_COPIE.reponses.add(epreuveQuestionId);
+  voirCopie(stagiaireId);
+}
+function toggleCorrectionCle(questionId, stagiaireId) {
+  EDITION_COPIE.cles.has(questionId)
+    ? EDITION_COPIE.cles.delete(questionId) : EDITION_COPIE.cles.add(questionId);
+  voirCopie(stagiaireId);
+}
+
+async function enregistrerReponseFormateur(epreuveQuestionId, stagiaireId) {
+  const choix = $$(`#rf-${epreuveQuestionId} input:checked`).map(i => i.value);
+  if (!choix.length && !confirmer('Aucune case cochée : enregistrer une absence de réponse ?')) return;
+  try {
+    await rpc('formateur_repondre', { p_epreuve_question_id: epreuveQuestionId, p_reponses: choix });
+    EDITION_COPIE.reponses.delete(epreuveQuestionId);
+    toast('Réponse enregistrée et copie recalculée');
+    voirCopie(stagiaireId);
+  } catch (e) { erreurSupabase('Saisie de la réponse', e); }
+}
+
+async function enregistrerCorrectionCle(questionId, stagiaireId) {
+  const bonnes = $$(`#cc-${questionId} input:checked`).map(i => i.value);
+  if (!bonnes.length) return toast('Il faut cocher au moins une bonne réponse', 'erreur');
+  if (!confirmer('Cette correction s\'applique à TOUTES les copies déjà corrigées qui contiennent '
+    + 'cette question, dans tout l\'organisme. Continuer ?')) return;
+  try {
+    const n = await rpc('corriger_question_erronee', { p_question_id: questionId, p_bonnes_ids: bonnes });
+    EDITION_COPIE.cles.delete(questionId);
+    toast(`Clé corrigée — ${n} copie(s) recalculée(s)`);
+    voirCopie(stagiaireId);
+  } catch (e) { erreurSupabase('Correction de la clé', e); }
+}
+
+/* Journal des interventions manuelles de la session — traçabilité légale :
+ * toute réponse saisie par le formateur ou clé de question corrigée doit
+ * pouvoir être retrouvée après coup (qui, quand, avant/après). */
+async function voirJournalSession(sessionId) {
+  let lignes = [];
+  try { lignes = await rpc('journal_session', { p_session_id: sessionId }); }
+  catch (e) { return erreurSupabase('Journal de la session', e); }
+
+  const LIBELLES_ACTION = {
+    reponse_saisie_formateur: 'Réponse saisie par le formateur',
+    cle_question_corrigee: 'Clé de question corrigée',
+    generation: 'Titre d\'habilitation généré',
+  };
+
+  ouvrirModale('Journal des interventions', `
+    <p class="aide">Historique des interventions manuelles sur cette session — conservé pour
+      justifier tout écart avec la correction automatique.</p>
+    <table class="tableau">
+      <thead><tr><th>Date</th><th>Formateur</th><th>Stagiaire</th><th>Action</th><th>Détail</th></tr></thead>
+      <tbody>${lignes.map(l => `<tr>
+        <td>${new Date(l.horodatage).toLocaleString('fr-FR')}</td>
+        <td>${esc(l.formateur)}</td>
+        <td>${esc(l.stagiaire)}</td>
+        <td>${esc(LIBELLES_ACTION[l.action] || l.action)}</td>
+        <td>${detailJournal(l)}</td>
+      </tr>`).join('') || `<tr><td colspan="5"><i>Aucune intervention manuelle enregistrée.</i></td></tr>`}</tbody>
+    </table>
+    <div class="pied-modale"><button onclick="fermerModale()">Fermer</button></div>`);
+}
+
+function detailJournal(l) {
+  const d = l.details || {};
+  if (l.action === 'reponse_saisie_formateur') {
+    return `Question n°${esc(d.question_numero)} — avant : ${(d.avant || []).length} réponse(s),
+      après : ${(d.apres || []).length} réponse(s)`;
+  }
+  if (l.action === 'cle_question_corrigee') {
+    return `Question n°${esc(d.question_numero)} — « ${esc((d.question_enonce || '').slice(0, 80))} »`;
+  }
+  return esc(JSON.stringify(d));
+}
+
 async function voirCopie(stagiaireId) {
   const { data: ep } = await sb.from('epreuves_theoriques')
     .select('*').eq('stagiaire_id', stagiaireId).maybeSingle();
   if (!ep) return toast('Aucun sujet généré pour ce stagiaire', 'erreur');
 
   const { data: qs } = await sb.from('epreuve_questions')
-    .select('*, questions(enonce, explication, question_reponses(id, libelle, correcte)), reponses_stagiaire(reponses_ids, correcte)')
+    .select('*, questions(numero, theme_code, symboles_cibles, enonce, explication, image_url, question_reponses(id, libelle, correcte)), reponses_stagiaire(reponses_ids, correcte)')
     .eq('epreuve_id', ep.id).order('position');
+
+  // Détail par titre visé : le verdict global ci-dessus agrège tous les titres,
+  // mais un titre peut échouer seul sans invalider les autres (tronc commun vs
+  // thème propre à un titre — voir theorie_gabarit_ok côté SQL). On rejoue le
+  // même calcul par titre, et on repère les questions qui comptent pour chacun.
+  const gabaritsVises = ep.gabarits || [];
+  const verdictsParTitre = ep.statut === 'corrigee' || ep.statut === 'terminee'
+    ? Object.fromEntries(await Promise.all(gabaritsVises.map(async g =>
+        [g, await rpc('theorie_gabarit_ok', { p_epreuve_id: ep.id, p_gabarit_code: g }).catch(() => null)])))
+    : {};
+  // Pour chaque titre visé, les thèmes qui comptent dans son quota (tronc commun compris)
+  const themesParTitre = Object.fromEntries(gabaritsVises.map(g =>
+    [g, new Set(S.referentiel.quotas.filter(q => q.gabarit_code === g && q.nb > 0).map(q => q.theme_code))]));
 
   ouvrirModale('Copie corrigée', `
     <div class="bilan ${ep.reussie ? 'ok' : 'ko'}">
@@ -535,19 +632,66 @@ async function voirCopie(stagiaireId) {
       · questions fondamentales : ${ep.fondamentales_ok ? 'toutes justes' : 'au moins une ratée'}
       · <b>${ep.reussie ? 'ADMIS' : 'NON ADMIS'}</b>
     </div>
+    ${gabaritsVises.length ? `<div class="detail-titres">
+      <b>Détail par titre visé</b>
+      <ul>${gabaritsVises.map(g => {
+        const ok = verdictsParTitre[g];
+        return `<li class="${ok === true ? 'juste' : ok === false ? 'faux' : ''}">
+          <span class="puce ${ok === true ? 'titre-vert-fonce' : ok === false ? 'titre-rouge' : ''}">
+            ${esc(libelleGabarit(g))}</span>
+          ${ok === true ? '✔ validé' : ok === false ? '✘ non validé' : 'en attente'}</li>`;
+      }).join('')}</ul>
+    </div>` : ''}
     <ol class="copie">${(qs || []).map(q => {
       const donnees = q.reponses_stagiaire?.reponses_ids || [];
       const juste = q.reponses_stagiaire?.correcte;
-      return `<li class="${juste ? 'juste' : 'faux'}">
-        <div class="enonce">${esc(q.questions.enonce)}
-          ${q.fondamentale ? '<span class="puce fond">fondamentale</span>' : ''}</div>
+      const sansReponse = donnees.length === 0;
+      const titresConcernes = gabaritsVises.filter(g => themesParTitre[g]?.has(q.theme_code));
+      const editionReponse = EDITION_COPIE.reponses.has(q.id);
+      const editionCle = EDITION_COPIE.cles.has(q.question_id);
+      return `<li class="${sansReponse ? '' : juste ? 'juste' : 'faux'}">
+        <div class="enonce">
+          <span class="puce" title="Numéro de la question">${esc(codeAffiche(q.questions))}</span>
+          ${esc(q.questions.enonce)}
+          ${q.fondamentale ? '<span class="puce fond">fondamentale</span>' : ''}
+          ${sansReponse ? '<span class="puce alerte">sans réponse</span>' : ''}
+          ${titresConcernes.map(g => `<span class="puce" title="Compte pour ce titre">${esc(libelleGabarit(g))}</span>`).join('')}
+        </div>
+        ${q.questions.image_url ? `<img class="vignette-question" src="${esc(q.questions.image_url)}" alt="">` : ''}
         <ul>${q.questions.question_reponses.map(r => `
           <li class="${r.correcte ? 'bonne' : ''} ${donnees.includes(r.id) ? 'cochee' : ''}">
             ${donnees.includes(r.id) ? '☑' : '☐'} ${esc(r.libelle)}</li>`).join('')}</ul>
         ${q.questions.explication ? `<p class="explication">${esc(q.questions.explication)}</p>` : ''}
+
+        <div class="actions-recorrection">
+          ${sansReponse ? `<button type="button" class="lien" onclick="toggleReponseFormateur('${q.id}', '${stagiaireId}')">
+            ${editionReponse ? 'Annuler la saisie' : '✎ Saisir la réponse à sa place'}</button>` : ''}
+          <button type="button" class="lien" onclick="toggleCorrectionCle('${q.question_id}', '${stagiaireId}')">
+            ${editionCle ? 'Annuler la correction' : '⚠ Cette question est erronée'}</button>
+        </div>
+
+        ${editionReponse ? `<div class="recorrection" id="rf-${q.id}">
+          <p class="aide">Coche la ou les réponses que le stagiaire aurait dû donner.</p>
+          ${q.questions.question_reponses.map(r => `
+            <label class="case"><input type="${q.questions.choix_multiple ? 'checkbox' : 'radio'}"
+              name="rf-${q.id}" value="${r.id}"> ${esc(r.libelle)}</label>`).join('')}
+          <button type="button" class="principal" onclick="enregistrerReponseFormateur('${q.id}', '${stagiaireId}')">Enregistrer</button>
+        </div>` : ''}
+
+        ${editionCle ? `<div class="recorrection" id="cc-${q.question_id}">
+          <p class="aide alerte">Coche la ou les VRAIES bonnes réponses. S'applique à toutes les copies
+            déjà corrigées contenant cette question, dans tout l'organisme — recalcul automatique.</p>
+          ${q.questions.question_reponses.map(r => `
+            <label class="case"><input type="checkbox" name="cc-${q.question_id}" value="${r.id}"
+              ${r.correcte ? 'checked' : ''}> ${esc(r.libelle)}</label>`).join('')}
+          <button type="button" class="principal" onclick="enregistrerCorrectionCle('${q.question_id}', '${stagiaireId}')">Corriger la clé</button>
+        </div>` : ''}
       </li>`;
     }).join('')}</ol>
-    <div class="pied-modale"><button onclick="fermerModale()">Fermer</button></div>`);
+    <div class="pied-modale">
+      <button class="lien" onclick="voirJournalSession('${S.session.id}')">🗂 Journal des interventions</button>
+      <button onclick="fermerModale()">Fermer</button>
+    </div>`);
 }
 
 /* ============ 5. Import / export Excel des stagiaires =============== */
@@ -645,6 +789,9 @@ async function rendreBanque(zone) {
       <div>
         <label class="bouton-fichier" title="Importer un fichier GIFT (export Moodle)">⬆ Importer GIFT
           <input type="file" accept=".gift,.txt" hidden onchange="importerGift(this)"></label>
+        <label class="bouton-fichier" title="Déposer plusieurs images à la fois, nommées d'après le numéro de la question (ex: 42.jpg)">
+          🖼 Importer des images en masse
+          <input type="file" accept="image/*" multiple hidden onchange="importerImagesEnMasse(this)"></label>
         <button onclick="listerAValider()">Questions à relire</button>
         <button class="principal" onclick="editerQuestion(null)">+ Nouvelle question</button>
       </div>
@@ -680,16 +827,47 @@ async function listerQuestions(themeCode) {
   ouvrirModale(libelleTheme(themeCode), `
     <ol class="copie">${(data || []).map(q => `
       <li>
-        <div class="enonce">${esc(q.enonce)}
+        <div class="enonce">
+          <span class="puce" title="Numéro et famille de la question">${esc(codeAffiche(q))}</span>
+          ${esc(q.enonce)}
           ${q.fondamentale ? '<span class="puce fond">fondamentale</span>' : ''}
           ${q.a_valider ? '<span class="puce alerte">à relire</span>' : ''}
           ${!q.active ? '<span class="puce">désactivée</span>' : ''}
           <button class="icone" title="Modifier" onclick="editerQuestion('${q.id}')">✎</button>
         </div>
+        ${q.image_url ? `<img class="vignette-question" src="${esc(q.image_url)}" alt="Image de la question ${esc(codeAffiche(q))}">` : ''}
         <ul>${(q.question_reponses || []).sort((a, b) => a.position - b.position)
           .map(r => `<li class="${r.correcte ? 'bonne' : ''}">${r.correcte ? '✔' : '·'} ${esc(r.libelle)}</li>`).join('')}</ul>
       </li>`).join('') || '<i>Aucune question dans cette thématique.</i>'}</ol>
     <div class="pied-modale"><button onclick="fermerModale()">Fermer</button></div>`);
+}
+
+/* --------- Numérotation « Q{numéro}.{famille}.{thème} » (2026-08) ---------
+ * La famille (NE / ELEC / COM) n'est jamais stockée : elle est recalculée
+ * ici à partir du référentiel déjà en mémoire (S.referentiel), en miroir
+ * exact de la fonction SQL question_famille() — même règle des deux côtés. */
+function familleQuestion(q) {
+  const gabaritsTheme = S.referentiel.quotas
+    .filter(qt => qt.theme_code === q.theme_code && qt.nb > 0)
+    .map(qt => qt.gabarit_code);
+  let concernes = gabaritsTheme;
+  if (q.symboles_cibles && q.symboles_cibles.length) {
+    const accessibles = new Set();
+    q.symboles_cibles.forEach(sym => (S.referentiel.gabaritsParSymbole[sym] || []).forEach(g => accessibles.add(g)));
+    concernes = gabaritsTheme.filter(g => accessibles.has(g));
+  }
+  const familles = new Set(concernes.map(gc =>
+    (S.referentiel.gabarits.find(g => g.code === gc) || {}).famille).filter(Boolean));
+  if (familles.size === 0) return null;
+  if (familles.size > 1) return 'COM';
+  return [...familles][0] === 'non_elec' ? 'NE' : 'ELEC';
+}
+
+function codeAffiche(q) {
+  const theme = S.referentiel.themes.find(t => t.code === q.theme_code);
+  const court = theme?.code_court || q.theme_code;
+  const fam = familleQuestion(q);
+  return `Q${q.numero}` + (fam ? `.${fam}.${court}` : `.${court}`);
 }
 
 async function listerAValider() {
@@ -717,12 +895,15 @@ async function editerQuestion(id) {
     q = { ...data, reponses: (data.question_reponses || []).sort((a, b) => a.position - b.position) };
   }
 
-  ouvrirModale(id ? 'Modifier la question' : 'Nouvelle question', `
+  ouvrirModale(id ? `Modifier la question ${esc(codeAffiche(q))}` : 'Nouvelle question', `
     <form id="form-question" class="formulaire">
       <label>Thématique
         <select name="theme">${S.referentiel.themes.map(t =>
           `<option value="${t.code}" ${t.code === q.theme_code ? 'selected' : ''}>${esc(t.libelle)}</option>`).join('')}
         </select></label>
+      ${id ? `<label>Image (facultative)
+        ${q.image_url ? `<img class="vignette-question" src="${esc(q.image_url)}" alt="">` : '<i>Aucune image.</i>'}
+        <input type="file" accept="image/*" onchange="televerserImageQuestion('${id}', this)"></label>` : ''}
       <label>Énoncé <textarea name="enonce" rows="2" required>${esc(q.enonce)}</textarea></label>
       <label>Explication affichée à la correction (facultatif)
         <textarea name="explication" rows="2">${esc(q.explication)}</textarea></label>
@@ -792,6 +973,60 @@ function ligneReponse(r = { libelle: '', correcte: false }) {
       onclick="this.parentElement.remove()">✕</button></div>`;
 }
 function ajouterReponse() { $('#reponses').insertAdjacentHTML('beforeend', ligneReponse()); }
+
+/* --------------------- Images des questions (2026-08) --------------------- */
+async function televerserImageQuestion(questionId, input) {
+  const fichier = input.files?.[0];
+  if (!fichier) return;
+  try {
+    const url = await deposerImageQuestion(questionId, fichier);
+    const { error } = await sb.from('questions').update({ image_url: url }).eq('id', questionId);
+    if (error) throw error;
+    toast('Image enregistrée');
+    editerQuestion(questionId);
+  } catch (e) { erreurSupabase('Import de l\'image', e); }
+}
+
+/** Dépose un fichier dans le bucket question-images sous un nom stable
+ * (numéro de question + extension), avec upsert pour permettre le remplacement. */
+async function deposerImageQuestion(questionId, fichier, numero) {
+  const ext = (fichier.name.split('.').pop() || 'jpg').toLowerCase();
+  const chemin = `${numero ?? questionId}.${ext}`;
+  const { error } = await sb.storage.from('question-images')
+    .upload(chemin, fichier, { upsert: true, cacheControl: '3600' });
+  if (error) throw error;
+  const { data } = sb.storage.from('question-images').getPublicUrl(chemin);
+  return data.publicUrl + '?v=' + Date.now(); // évite le cache navigateur après remplacement
+}
+
+/** Import en masse : chaque fichier déposé doit être nommé d'après le numéro
+ * de la question à illustrer (ex: "42.jpg", "Q42.png", "42 - schéma.jpg" —
+ * seuls les chiffres en tête du nom sont lus). */
+async function importerImagesEnMasse(input) {
+  const fichiers = [...(input.files || [])];
+  if (!fichiers.length) return;
+
+  const { data: questions, error } = await sb.from('questions').select('id, numero');
+  if (error) return erreurSupabase('Import en masse — lecture des numéros', error);
+  const parNumero = Object.fromEntries((questions || []).map(q => [String(q.numero), q.id]));
+
+  let ok = 0; const echecs = [];
+  for (const fichier of fichiers) {
+    const m = fichier.name.match(/^\D*(\d+)/);
+    const numero = m ? m[1] : null;
+    const questionId = numero && parNumero[numero];
+    if (!questionId) { echecs.push(fichier.name); continue; }
+    try {
+      const url = await deposerImageQuestion(questionId, fichier, numero);
+      const { error: errMaj } = await sb.from('questions').update({ image_url: url }).eq('id', questionId);
+      if (errMaj) throw errMaj;
+      ok++;
+    } catch (e) { DEBUG.erreur('import image ' + fichier.name, e.message); echecs.push(fichier.name); }
+  }
+  input.value = '';
+  toast(`${ok} image(s) importée(s)` + (echecs.length ? `, ${echecs.length} non associée(s) : ${echecs.join(', ')}` : ''),
+    echecs.length ? 'erreur' : 'ok', 8000);
+}
 
 /* ---------------------- import GIFT (Moodle) ----------------------- */
 /**
