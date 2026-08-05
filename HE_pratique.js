@@ -81,9 +81,12 @@ async function rendrePratique(zone) {
        Critère d'acceptation : <b>aucun D et un seul C au maximum par mise en situation</b>.</p>
     ${[...(epreuves || [])]
       // Même logique que pour les mises en situation à l'intérieur d'un titre :
-      // les épreuves encore à faire remontent en haut, les titres déjà validés
-      // descendent en bas — à égalité on garde l'ordre alphabétique du gabarit.
-      .sort((a, b) => ((a.reussie === true) - (b.reussie === true)) || a.gabarit_code.localeCompare(b.gabarit_code))
+      // les épreuves encore à faire remontent en haut, celles déjà closes —
+      // validées OU en échec, une fois « Valider cette épreuve » cliqué —
+      // descendent en bas. Avant : seule une réussite faisait descendre la
+      // carte, un échec validé restait donc coincé en haut avec les épreuves
+      // pas commencées (signalé comme un blocage par le formateur).
+      .sort((a, b) => ((a.reussie !== null) - (b.reussie !== null)) || a.gabarit_code.localeCompare(b.gabarit_code))
       .map(ep => carteEpreuve(ep, scenarios || [], theorieEchoueePourGabarit(ep.gabarit_code))).join('')}`;
 
   if (dejaAffiche) window.scrollTo(0, scrollY);
@@ -145,9 +148,41 @@ function carteEpreuve(ep, scenarios, theorieEchouee) {
             : `<span class="aide">Nombre maximal de mises en situation atteint (${min + rattrapage}).</span>`}
         <label class="plein">Observations générales
           <textarea rows="2" onchange="majObservations('${ep.id}', this.value)">${esc(ep.observations)}</textarea></label>
+        ${ep.reussie === false ? recommandationEchec(ep) : ''}
         <button class="principal" onclick="cloturerEpreuve('${ep.id}')">Valider cette épreuve</button>
       </div>
     </section>`;
+}
+
+const RECOMMANDATIONS_ECHEC = [
+  'Repasser l\'épreuve pratique',
+  'Refaire toute la formation',
+  'Repasser l\'épreuve théorique et pratique',
+];
+
+// Suite à donner communiquée au client en cas d'échec : liste de préréglages
+// + champ libre, plutôt qu'un texte saisi à la main à chaque fois (2026-08,
+// demande explicite après un échec HE Manœuvre non accompagné de préconisation).
+function recommandationEchec(ep) {
+  const valeur = ep.recommandation || '';
+  const estPreset = RECOMMANDATIONS_ECHEC.includes(valeur);
+  return `
+    <label class="plein">Recommandation suite à échec (transmise au client)
+      <select onchange="if(this.value==='__autre__'){this.nextElementSibling.hidden=false;this.nextElementSibling.focus();}else{this.nextElementSibling.hidden=true;majRecommandation('${ep.id}', this.value);}">
+        <option value="">— à préciser —</option>
+        ${RECOMMANDATIONS_ECHEC.map(r => `<option value="${esc(r)}" ${valeur === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}
+        <option value="__autre__" ${valeur && !estPreset ? 'selected' : ''}>Autre (préciser)…</option>
+      </select>
+      <input type="text" placeholder="Préciser la recommandation…" value="${esc(!estPreset ? valeur : '')}"
+        ${valeur && !estPreset ? '' : 'hidden'}
+        onchange="majRecommandation('${ep.id}', this.value)"></label>`;
+}
+
+async function majRecommandation(epreuveId, texte) {
+  const { error } = await sb.from('epreuves_pratiques')
+    .update({ recommandation: texte || null }).eq('id', epreuveId);
+  if (error) return erreurSupabase('Enregistrement de la recommandation', error);
+  toast('Recommandation enregistrée');
 }
 
 // Filtre défensif : une ligne evaluations_savoir_faire dont le gabarit_savoir_faire

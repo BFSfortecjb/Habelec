@@ -11,6 +11,19 @@
 
 const { jsPDF } = window.jspdf;
 
+// Charte graphique Univers BFS (commune à toutes les applis) : jaune #f3ab12,
+// rouge #b2181a, gris #464645, noir #080808. Police Montserrat côté web ;
+// jsPDF ne l'embarque pas nativement (police non fournie/licenciée pour PDF),
+// Helvetica reste donc la police du document — seule la palette de couleurs
+// est reprise ici.
+const BFS = {
+  jaune: [243, 171, 18],
+  rouge: [178, 24, 26],
+  gris: [70, 70, 69],
+  noir: [8, 8, 8],
+  grisClair: [244, 244, 243],
+};
+
 function caseACocher(doc, x, y, cochee, taille = 3.2) {
   doc.setLineWidth(0.25);
   doc.rect(x, y, taille, taille);
@@ -63,9 +76,12 @@ async function genererTitrePdf(stagiaireId) {
   let y = marge;
 
   /* ================= AVIS D'HABILITATION ================= */
-  doc.setFont('helvetica', 'bold').setFontSize(15);
+  doc.setTextColor(...BFS.noir).setFont('helvetica', 'bold').setFontSize(15);
   doc.text('AVIS D\'HABILITATION ÉLECTRIQUE', largeur / 2, y, { align: 'center' });
-  y += 8;
+  y += 3;
+  doc.setDrawColor(...BFS.jaune).setLineWidth(0.8).line(largeur / 2 - 22, y, largeur / 2 + 22, y);
+  doc.setLineWidth(0.2);
+  y += 5;
 
   doc.setFont('helvetica', 'normal').setFontSize(9);
   doc.text('NOM : ' + (st.nom || ''), marge, y);
@@ -84,7 +100,7 @@ async function genererTitrePdf(stagiaireId) {
   doc.autoTable({
     startY: y, margin: { left: marge, right: marge }, theme: 'grid',
     styles: { fontSize: 8.5, cellPadding: 2.2, valign: 'top' },
-    headStyles: { fillColor: [235, 238, 242], textColor: 20, fontStyle: 'bold' },
+    headStyles: { fillColor: BFS.jaune, textColor: BFS.noir, fontStyle: 'bold' },
     columnStyles: { 0: { cellWidth: 34 }, 1: { cellWidth: 28 }, 2: { cellWidth: 40 }, 3: { cellWidth: 30 } },
     head: [['Formateur', 'Résultat théorique', 'Habilitation recommandée', 'Restrictions', 'Observations']],
     body: [
@@ -103,7 +119,7 @@ async function genererTitrePdf(stagiaireId) {
   });
   y = doc.lastAutoTable.finalY + 5;
 
-  doc.setFont('helvetica', 'normal').setFontSize(7.3).setTextColor(60);
+  doc.setFont('helvetica', 'normal').setFontSize(7.3).setTextColor(...BFS.gris);
   doc.text(
     'L\'avis d\'habilitation délivré par le formateur ne vaut ni certification, ni habilitation. Il '
     + 'constitue un élément sur lequel l\'employeur pourra fonder sa décision d\'habiliter le salarié, '
@@ -111,9 +127,8 @@ async function genererTitrePdf(stagiaireId) {
     + 'environnement de travail et de ses activités, de son aptitude médicale.',
     marge, y, { maxWidth: largeurUtile, lineHeightFactor: 1.3 });
   y += 11;
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('helvetica', 'bold').setTextColor(...BFS.noir);
   doc.text('L\'habilitation est accordée par l\'employeur.', marge, y);
-  doc.setTextColor(0);
   y += 6;
 
   doc.autoTable({
@@ -140,13 +155,13 @@ async function genererTitrePdf(stagiaireId) {
   const elec = S.referentiel.lignesTitre.filter(lt => !lt.section.includes('non électrique'));
   const ligneSection = texte => [{
     content: texte, colSpan: 5,
-    styles: { fillColor: [235, 238, 242], fontStyle: 'bold', halign: 'center', textColor: 20 },
+    styles: { fillColor: BFS.grisClair, fontStyle: 'bold', halign: 'center', textColor: BFS.noir },
   }];
 
   doc.autoTable({
     startY: y, margin: { left: marge, right: marge }, theme: 'grid',
     styles: { fontSize: 8.5, cellPadding: 2.5, valign: 'middle' },
-    headStyles: { fillColor: [60, 60, 60], textColor: 255, fontStyle: 'bold', halign: 'center' },
+    headStyles: { fillColor: BFS.jaune, textColor: BFS.noir, fontStyle: 'bold', halign: 'center' },
     columnStyles: {
       0: { cellWidth: 34 }, 1: { cellWidth: 30, fontStyle: 'bold' },
       2: { cellWidth: 26 }, 3: { cellWidth: 48 }, 4: { cellWidth: largeurUtile - 34 - 30 - 26 - 48 },
@@ -162,11 +177,10 @@ async function genererTitrePdf(stagiaireId) {
   });
   y = doc.lastAutoTable.finalY + 6;
 
-  doc.setFontSize(7).setTextColor(90);
+  doc.setFontSize(7).setTextColor(...BFS.gris);
   doc.text('La rubrique « indications supplémentaires » doit être obligatoirement renseignée le cas '
     + 'échéant. Cette habilitation n\'autorise pas à elle seule son titulaire à effectuer de son '
     + 'propre chef les opérations pour lesquelles il est habilité.', marge, y, { maxWidth: largeurUtile });
-  doc.setTextColor(0);
 
   /* ================= TITRE (carte à découper, bas de page) ================= */
   // Hauteur fixe, ancrée au bas de la page : position de coupe identique
@@ -176,12 +190,11 @@ async function genererTitrePdf(stagiaireId) {
   if (y > hauteurPage - hauteurCarte - 6) doc.addPage();
   const yCarte = hauteurPage - hauteurCarte;
 
-  doc.setDrawColor(120).setLineDashPattern([2, 1.5], 0);
+  doc.setDrawColor(...BFS.gris).setLineDashPattern([2, 1.5], 0);
   doc.line(marge, yCarte, largeur - marge, yCarte);
   doc.setLineDashPattern([], 0);
-  doc.setFontSize(7).setTextColor(110).setFont('helvetica', 'italic');
+  doc.setFontSize(7).setTextColor(...BFS.gris).setFont('helvetica', 'italic');
   doc.text('✂ découper ici — carte à remettre au titulaire', largeur / 2, yCarte - 1.5, { align: 'center' });
-  doc.setTextColor(0);
 
   const yc = yCarte + 6;
   const colTitulaire = marge;
@@ -189,10 +202,14 @@ async function genererTitrePdf(stagiaireId) {
   const colAvis = marge + largeurUtile * 0.66;
   const largeurColAvis = largeurUtile * 0.34;
 
-  doc.setFont('helvetica', 'bold').setFontSize(11);
+  doc.setTextColor(...BFS.noir).setFont('helvetica', 'bold').setFontSize(11);
   doc.text('TITRE D\'HABILITATION ÉLECTRIQUE', largeur / 2, yc, { align: 'center' });
-  doc.setFontSize(7.5).setFont('helvetica', 'normal');
-  doc.text('NF C18-510 — ' + (org.raison_sociale || ''), largeur / 2, yc + 4, { align: 'center' });
+  doc.setDrawColor(...BFS.jaune).setLineWidth(0.6)
+    .line(largeur / 2 - 16, yc + 1.4, largeur / 2 + 16, yc + 1.4);
+  doc.setLineWidth(0.2);
+  doc.setFontSize(7.5).setFont('helvetica', 'normal').setTextColor(...BFS.gris);
+  doc.text('NF C18-510 — ' + (org.raison_sociale || ''), largeur / 2, yc + 5.5, { align: 'center' });
+  doc.setTextColor(...BFS.noir);
 
   doc.setFont('helvetica', 'bold').setFontSize(8.5);
   doc.text('LE TITULAIRE', colTitulaire, yc + 11);
