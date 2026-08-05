@@ -16,7 +16,7 @@ const { jsPDF } = window.jspdf;
 // après un déploiement, que le navigateur a bien chargé le dernier
 // HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
 // modification notable de ce fichier ; aucun effet fonctionnel.
-const PDF_VERSION = 'v7-2026-08-05';
+const PDF_VERSION = 'v8-2026-08-05';
 
 function piedDeVersion(doc, largeur, hauteurPage, marge) {
   doc.setFont('helvetica', 'normal').setFontSize(6).setTextColor(180, 180, 180);
@@ -86,18 +86,18 @@ async function genererTitrePdf(stagiaireId) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const largeur = 210, hauteurPage = 297, marge = 12, largeurUtile = largeur - 2 * marge;
   let y = marge;
-  // Zone de découpe : même hauteur (66 mm) et même position, ancrée en bas de
-  // page, sur la page 1 (recto) ET la page 2 (verso) — indispensable pour que
-  // le cut recto verso tombe au même endroit des deux côtés de la feuille.
-  // 58 mm : suffisant pour le contenu de la carte (~50 mm) tout en laissant
-  // le trait de coupe juste sous le tableau Personnel × Symbole de la page 1
-  // (qui occupe la quasi-totalité de la page — voir mesures 2026-08-05,
-  // PDF_VERSION v7). Avec 66 mm le trait tombait systématiquement DANS le
-  // texte de la page 1 et le repère de découpe n'était donc jamais dessiné
-  // sur le recto (la garde-fou `if (y < yCarte - 3)` le supprimait à chaque
-  // fois) — seul le verso montrait un trait, d'où l'impression de hauteurs
-  // différentes.
-  const hauteurCarte = 58;
+  // Le document imprimé recto verso, une fois découpé à hauteur yCarte,
+  // donne DEUX morceaux : le grand morceau du haut (dossier employeur —
+  // avis en recto, rien en verso) et la bande du bas qui EST le titre à
+  // remettre au titulaire (carte compacte en recto / grand tableau Annexe C
+  // en verso). yCarte doit donc être calé sur le plus haut des deux
+  // contenus de la bande du bas — le tableau Personnel × Symbole (~100 mm),
+  // pas la petite carte (~50 mm) — sinon le tableau déborde en bas de page
+  // 2. Voir PDF_VERSION v8 (2026-08-05) : avant cette version le tableau
+  // était (à tort) sur la page 1 avec l'avis, et la carte seule sur la
+  // page 2 — la bande découpée n'avait donc son verso correct que côté
+  // carte, jamais côté tableau.
+  const hauteurCarte = 122;
   const yCarte = hauteurPage - hauteurCarte;
 
   /* ================= AVIS D'HABILITATION ================= */
@@ -167,53 +167,13 @@ async function genererTitrePdf(stagiaireId) {
   });
   y = doc.lastAutoTable.finalY + 4;
 
-  /* ---- Tableau d'avis d'habilitation (Annexe C) : Personnel × Symbole × Champ ---- */
-  const domaines = (titre.domaines || []).join(', ') || '—';
-  const installations = titre.ouvrages || '—';
-  const indications = titre.indications || '—';
-  const ligneAvis = lt => {
-    const symboles = (lignes[lt.code] || []).join(', ');
-    return [lt.libelle, symboles || '—',
-      symboles ? domaines : '—', symboles ? installations : '—', symboles ? indications : '—'];
-  };
-  const nonElec = S.referentiel.lignesTitre.filter(lt => lt.section.includes('non électrique'));
-  const elec = S.referentiel.lignesTitre.filter(lt => !lt.section.includes('non électrique'));
-  const ligneSection = texte => [{
-    content: texte, colSpan: 5,
-    styles: { fillColor: BFS.grisClair, fontStyle: 'bold', halign: 'center', textColor: BFS.noir },
-  }];
-
-  doc.autoTable({
-    startY: y, margin: { left: marge, right: marge }, theme: 'grid',
-    styles: { fontSize: 8.5, cellPadding: 2.5, valign: 'middle' },
-    headStyles: { fillColor: BFS.jaune, textColor: BFS.noir, fontStyle: 'bold', halign: 'center' },
-    columnStyles: {
-      0: { cellWidth: 34 }, 1: { cellWidth: 30, fontStyle: 'bold' },
-      2: { cellWidth: 26 }, 3: { cellWidth: 48 }, 4: { cellWidth: largeurUtile - 34 - 30 - 26 - 48 },
-    },
-    head: [['Personnel', 'Symbole d\'habilitation\net attribut', 'Domaine\nde tension',
-      'Installations concernées', 'Indications supplémentaires']],
-    body: [
-      ligneSection('Opérations d\'ordre non électrique'),
-      ...nonElec.map(ligneAvis),
-      ligneSection('Opérations d\'ordre électrique'),
-      ...elec.map(ligneAvis),
-    ],
-  });
-  y = doc.lastAutoTable.finalY + 4;
-
-  doc.setFontSize(7).setTextColor(...BFS.gris);
-  doc.text('La rubrique « indications supplémentaires » doit être obligatoirement renseignée le cas '
-    + 'échéant. Cette habilitation n\'autorise pas à elle seule son titulaire à effectuer de son '
-    + 'propre chef les opérations pour lesquelles il est habilité.', marge, y, { maxWidth: largeurUtile });
-
   piedDeVersion(doc, largeur, hauteurPage, marge);
 
-  // Repère de découpe sur la page 1 (recto), à la MÊME hauteur que sur la
-  // page 2 (verso) ci-dessous — la zone sous ce trait reste vide sur le
-  // recto, pour que la découpe ne coupe aucun contenu de l'avis. Si l'avis
-  // déborde déjà au-delà de cette ligne, on ne dessine pas le repère plutôt
-  // que de le superposer au texte.
+  // Repère de découpe sur la page 1 (recto) : la bande sous ce trait n'est
+  // PAS un simple espace vide, c'est le recto du titre à remettre au
+  // titulaire (la carte compacte ci-dessous). Le garde-fou évite juste que
+  // le trait ne vienne se superposer au dossier employeur si celui-ci était
+  // exceptionnellement long.
   if (y < yCarte - 3) {
     doc.setDrawColor(...BFS.gris).setLineDashPattern([2, 1.5], 0);
     doc.line(marge, yCarte, largeur - marge, yCarte);
@@ -222,21 +182,11 @@ async function genererTitrePdf(stagiaireId) {
     doc.text('✂ découper ici (même hauteur qu\'au verso)', largeur / 2, yCarte - 1.5, { align: 'center' });
   }
 
-  /* ================= TITRE (carte à découper, bas de page 2 — verso) ================= */
-  // Toujours sur sa propre page (verso), à une position fixe : si la carte
-  // partageait parfois la page 1 (avis court) et parfois une page 2 à part
-  // (avis long), sa hauteur de découpe changeait d'un stagiaire à l'autre —
-  // impossible à couper proprement en recto verso sur une pile de plusieurs
-  // titres. Une page dédiée systématique + la même constante yCarte que sur
-  // la page 1 garantit une découpe à la même hauteur des deux côtés.
-  doc.addPage();
-
-  doc.setDrawColor(...BFS.gris).setLineDashPattern([2, 1.5], 0);
-  doc.line(marge, yCarte, largeur - marge, yCarte);
-  doc.setLineDashPattern([], 0);
-  doc.setFontSize(7).setTextColor(...BFS.gris).setFont('helvetica', 'italic');
-  doc.text('✂ découper ici — carte à remettre au titulaire', largeur / 2, yCarte - 1.5, { align: 'center' });
-
+  /* ================= TITRE — RECTO (carte, bas de page 1) ================= */
+  // La carte est le RECTO du titre remis au titulaire ; son VERSO (le grand
+  // tableau Annexe C) est en bas de la page 2, à la MÊME hauteur yCarte —
+  // c'est ce qui permet de découper une seule bande, imprimée recto verso,
+  // qui porte la carte d'un côté et le tableau détaillé de l'autre.
   const yc = yCarte + 6;
   const colTitulaire = marge;
   const colEmployeur = marge + largeurUtile * 0.34;
@@ -281,6 +231,59 @@ async function genererTitrePdf(stagiaireId) {
   doc.setFont('helvetica', 'normal');
   doc.text('Validité : ' + (org.validite_annees || 3) + ' ans — à recycler avant le '
     + dateFr(titre.recycler_avant), colTitulaire, yc + 38);
+
+  piedDeVersion(doc, largeur, hauteurPage, marge);
+
+  /* ================= TITRE — VERSO (page 2) : Annexe C ================= */
+  // Toujours sur sa propre page, à la MÊME hauteur yCarte que le recto —
+  // c'est le tableau Personnel × Symbole × Champ d'application, imprimé au
+  // dos de la carte ci-dessus une fois la bande découpée.
+  doc.addPage();
+
+  doc.setDrawColor(...BFS.gris).setLineDashPattern([2, 1.5], 0);
+  doc.line(marge, yCarte, largeur - marge, yCarte);
+  doc.setLineDashPattern([], 0);
+  doc.setFontSize(7).setTextColor(...BFS.gris).setFont('helvetica', 'italic');
+  doc.text('✂ découper ici — verso du titre (à remettre au titulaire)', largeur / 2, yCarte - 1.5, { align: 'center' });
+
+  const domaines = (titre.domaines || []).join(', ') || '—';
+  const installations = titre.ouvrages || '—';
+  const indications = titre.indications || '—';
+  const ligneAvis = lt => {
+    const symboles = (lignes[lt.code] || []).join(', ');
+    return [lt.libelle, symboles || '—',
+      symboles ? domaines : '—', symboles ? installations : '—', symboles ? indications : '—'];
+  };
+  const nonElec = S.referentiel.lignesTitre.filter(lt => lt.section.includes('non électrique'));
+  const elec = S.referentiel.lignesTitre.filter(lt => !lt.section.includes('non électrique'));
+  const ligneSection = texte => [{
+    content: texte, colSpan: 5,
+    styles: { fillColor: BFS.grisClair, fontStyle: 'bold', halign: 'center', textColor: BFS.noir },
+  }];
+
+  doc.autoTable({
+    startY: yCarte + 8, margin: { left: marge, right: marge }, theme: 'grid',
+    styles: { fontSize: 8.5, cellPadding: 2.5, valign: 'middle' },
+    headStyles: { fillColor: BFS.jaune, textColor: BFS.noir, fontStyle: 'bold', halign: 'center' },
+    columnStyles: {
+      0: { cellWidth: 34 }, 1: { cellWidth: 30, fontStyle: 'bold' },
+      2: { cellWidth: 26 }, 3: { cellWidth: 48 }, 4: { cellWidth: largeurUtile - 34 - 30 - 26 - 48 },
+    },
+    head: [['Personnel', 'Symbole d\'habilitation\net attribut', 'Domaine\nde tension',
+      'Installations concernées', 'Indications supplémentaires']],
+    body: [
+      ligneSection('Opérations d\'ordre non électrique'),
+      ...nonElec.map(ligneAvis),
+      ligneSection('Opérations d\'ordre électrique'),
+      ...elec.map(ligneAvis),
+    ],
+  });
+  let yTableau = doc.lastAutoTable.finalY + 3;
+
+  doc.setFontSize(6.3).setTextColor(...BFS.gris).setFont('helvetica', 'normal');
+  doc.text('La rubrique « indications supplémentaires » doit être obligatoirement renseignée le cas '
+    + 'échéant. Cette habilitation n\'autorise pas à elle seule son titulaire à effectuer de son '
+    + 'propre chef les opérations pour lesquelles il est habilité.', marge, yTableau, { maxWidth: largeurUtile });
 
   piedDeVersion(doc, largeur, hauteurPage, marge);
 
