@@ -74,6 +74,11 @@ async function genererTitrePdf(stagiaireId) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const largeur = 210, hauteurPage = 297, marge = 12, largeurUtile = largeur - 2 * marge;
   let y = marge;
+  // Zone de découpe : même hauteur (66 mm) et même position, ancrée en bas de
+  // page, sur la page 1 (recto) ET la page 2 (verso) — indispensable pour que
+  // le cut recto verso tombe au même endroit des deux côtés de la feuille.
+  const hauteurCarte = 66;
+  const yCarte = hauteurPage - hauteurCarte;
 
   /* ================= AVIS D'HABILITATION ================= */
   doc.setTextColor(...BFS.noir).setFont('helvetica', 'bold').setFontSize(15);
@@ -182,13 +187,27 @@ async function genererTitrePdf(stagiaireId) {
     + 'échéant. Cette habilitation n\'autorise pas à elle seule son titulaire à effectuer de son '
     + 'propre chef les opérations pour lesquelles il est habilité.', marge, y, { maxWidth: largeurUtile });
 
-  /* ================= TITRE (carte à découper, bas de page) ================= */
-  // Hauteur fixe, ancrée au bas de la page : position de coupe identique
-  // d'un document à l'autre. Si l'avis ci-dessus déborde, la carte passe
-  // en bas de la page suivante plutôt que de chevaucher le tableau.
-  const hauteurCarte = 66;
-  if (y > hauteurPage - hauteurCarte - 6) doc.addPage();
-  const yCarte = hauteurPage - hauteurCarte;
+  // Repère de découpe sur la page 1 (recto), à la MÊME hauteur que sur la
+  // page 2 (verso) ci-dessous — la zone sous ce trait reste vide sur le
+  // recto, pour que la découpe ne coupe aucun contenu de l'avis. Si l'avis
+  // déborde déjà au-delà de cette ligne, on ne dessine pas le repère plutôt
+  // que de le superposer au texte.
+  if (y < yCarte - 3) {
+    doc.setDrawColor(...BFS.gris).setLineDashPattern([2, 1.5], 0);
+    doc.line(marge, yCarte, largeur - marge, yCarte);
+    doc.setLineDashPattern([], 0);
+    doc.setFontSize(7).setTextColor(...BFS.gris).setFont('helvetica', 'italic');
+    doc.text('✂ découper ici (même hauteur qu\'au verso)', largeur / 2, yCarte - 1.5, { align: 'center' });
+  }
+
+  /* ================= TITRE (carte à découper, bas de page 2 — verso) ================= */
+  // Toujours sur sa propre page (verso), à une position fixe : si la carte
+  // partageait parfois la page 1 (avis court) et parfois une page 2 à part
+  // (avis long), sa hauteur de découpe changeait d'un stagiaire à l'autre —
+  // impossible à couper proprement en recto verso sur une pile de plusieurs
+  // titres. Une page dédiée systématique + la même constante yCarte que sur
+  // la page 1 garantit une découpe à la même hauteur des deux côtés.
+  doc.addPage();
 
   doc.setDrawColor(...BFS.gris).setLineDashPattern([2, 1.5], 0);
   doc.line(marge, yCarte, largeur - marge, yCarte);
