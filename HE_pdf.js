@@ -22,13 +22,18 @@ function caseACocher(doc, x, y, cochee, taille = 3.2) {
   }
 }
 
-/* ------------------- 1. Titre + avis d'habilitation (une page) -----
- * Combine sur une seule page A4 portrait ce qui tenait avant sur deux
- * documents séparés : le bandeau titulaire/employeur/avis (~1/4 à 1/3
- * de la hauteur, en haut) et le tableau d'avis d'habilitation complet
- * (Personnel × Symbole × Champ d'application, Annexe C de la NF C18-510)
- * qui occupe le reste de la page. Économise le papier et simplifie la
- * remise au client (2026-08, demande explicite). */
+/* ------------------- 1. Avis d'habilitation + titre (une page) -----
+ * Modèle fourni par Jeremy (ressource/model avis d'habilitation + titre.pdf,
+ * 2026-08) : un seul document A4 portrait, imprimé recto verso, avec :
+ *   - en haut, l'AVIS D'HABILITATION : bloc formateur (note/appréciation,
+ *     habilitation recommandée, restrictions, observations, signature),
+ *     bloc organisme, puis le tableau Personnel × Symbole × Champ
+ *     d'application (Annexe C de la NF C18-510) ;
+ *   - en bas de la (dernière) page, séparée par une ligne de coupe, la
+ *     carte compacte TITRE (titulaire/employeur/avis légal/validité) —
+ *     positionnée en bas exprès pour être découpée aux ciseaux après
+ *     impression, sans toucher au reste du document qui sert de dossier
+ *     employeur. */
 async function genererTitrePdf(stagiaireId) {
   let titre;
   try {
@@ -44,84 +49,88 @@ async function genererTitrePdf(stagiaireId) {
   }
 
   const { data: st } = await sb.from('stagiaires').select('*').eq('id', stagiaireId).single();
+  const [{ data: session }, { data: ep }] = await Promise.all([
+    sb.from('sessions_formation').select('*').eq('id', st.session_id).single(),
+    sb.from('epreuves_theoriques').select('*').eq('stagiaire_id', stagiaireId).maybeSingle(),
+  ]);
   const org = S.organisme || {};
   const c = titre.contenu || {};
   const lignes = c.lignes || {};
+  const habilitationRecommandee = Object.values(lignes).flat().join(', ') || '—';
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const largeur = 210, marge = 12, largeurUtile = largeur - 2 * marge;
+  const largeur = 210, hauteurPage = 297, marge = 12, largeurUtile = largeur - 2 * marge;
   let y = marge;
 
-  /* ---- Bandeau du haut (~1/4 à 1/3 de la page) : titulaire / employeur / avis ---- */
-  const colTitulaire = marge;
-  const colEmployeur = marge + largeurUtile * 0.34;
-  const colAvis = marge + largeurUtile * 0.66;
-  const largeurColAvis = largeurUtile * 0.34;
-  const yBandeau = y;
+  /* ================= AVIS D'HABILITATION ================= */
+  doc.setFont('helvetica', 'bold').setFontSize(15);
+  doc.text('AVIS D\'HABILITATION ÉLECTRIQUE', largeur / 2, y, { align: 'center' });
+  y += 8;
 
-  doc.setFont('helvetica', 'bold').setFontSize(13);
-  doc.text('TITRE D\'HABILITATION ÉLECTRIQUE', largeur / 2, y + 5, { align: 'center' });
-  doc.setFontSize(8).setFont('helvetica', 'normal');
-  doc.text('NF C18-510 — ' + (org.raison_sociale || ''), largeur / 2, y + 10, { align: 'center' });
-  doc.setDrawColor(180).line(marge, y + 13, largeur - marge, y + 13);
-  y += 18;
-  const yColonnes = y;
-
-  // Titulaire
-  doc.setFont('helvetica', 'bold').setFontSize(9);
-  doc.text('LE TITULAIRE', colTitulaire, y);
-  doc.setFont('helvetica', 'normal').setFontSize(8.5);
-  doc.text('Nom : ' + (st.nom || ''), colTitulaire, y + 6);
-  doc.text('Prénom : ' + (st.prenom || ''), colTitulaire, y + 11);
-  doc.text('Fonction : ' + (st.fonction || ''), colTitulaire, y + 16);
-  doc.text('Signature :', colTitulaire, y + 21);
-  if (st.signature_data) doc.addImage(st.signature_data, 'PNG', colTitulaire + 20, y + 17, 34, 11);
-
-  // Employeur
-  doc.setFont('helvetica', 'bold').setFontSize(9);
-  doc.text('L\'EMPLOYEUR', colEmployeur, y);
-  doc.setFont('helvetica', 'normal').setFontSize(8.5);
-  doc.text('Société : ' + (org.raison_sociale || ''), colEmployeur, y + 6);
-  doc.text('Nom : ' + (org.signataire_nom || ''), colEmployeur, y + 11);
-  doc.text('Fonction : ' + (org.signataire_fonction || ''), colEmployeur, y + 16);
-  doc.text('Signature :', colEmployeur, y + 21);
-  if (org.signature_data) doc.addImage(org.signature_data, 'PNG', colEmployeur + 20, y + 17, 34, 11);
-
-  // Avis (texte légal + date/validité)
-  doc.setFont('helvetica', 'bold').setFontSize(9);
-  doc.text('AVIS', colAvis, y);
-  doc.setFont('helvetica', 'normal').setFontSize(6.6);
-  doc.text(
-    'Ce titre est établi et signé par l\'employeur puis remis à l\'intéressé qui doit également '
-    + 'le signer. Strictement personnel, il ne peut être remis à un tiers. Le titulaire doit le '
-    + 'conserver à sa portée pendant les heures de travail. Cette habilitation seule n\'autorise pas '
-    + 'à effectuer de son propre chef les opérations pour lesquelles elle est délivrée.',
-    colAvis, y + 4.5, { maxWidth: largeurColAvis, lineHeightFactor: 1.25 });
-  doc.setFontSize(8).setFont('helvetica', 'bold');
-  doc.text('Délivré le ' + dateFr(titre.delivre_le), colAvis, y + 25);
-  doc.setFont('helvetica', 'normal');
-  doc.text('Validité : ' + (org.validite_annees || 3) + ' ans — à recycler avant le '
-    + dateFr(titre.recycler_avant), colAvis, y + 29, { maxWidth: largeurColAvis });
-
-  y = yColonnes + 33;
-  if (titre.indications || titre.ouvrages) {
-    doc.setFontSize(7.5).setFont('helvetica', 'italic');
-    doc.text('Autorisations / indications supplémentaires : '
-      + (titre.indications || titre.ouvrages || ''), marge, y, { maxWidth: largeurUtile });
-    y += 5;
-  }
-  doc.setDrawColor(0).line(marge, y + 2, largeur - marge, y + 2);
+  doc.setFont('helvetica', 'normal').setFontSize(9);
+  doc.text('NOM : ' + (st.nom || ''), marge, y);
+  doc.text('Prénom : ' + (st.prenom || ''), marge + 70, y);
+  y += 6;
+  doc.text('Dates de la formation : ' + [dateFr(session?.date_debut), dateFr(session?.date_fin)]
+    .filter(Boolean).join(' au '), marge, y);
   y += 7;
 
-  /* ---- Tableau d'avis d'habilitation (Annexe C) : Personnel × Symbole × Champ ---- */
-  doc.setFont('helvetica', 'bold').setFontSize(10);
-  doc.text('AVIS D\'HABILITATION', largeur / 2, y, { align: 'center' });
-  y += 4;
+  doc.setFont('helvetica', 'normal').setFontSize(9.5);
+  doc.text('Résultats de l\'évaluation et avis d\'habilitation du formateur :', marge, y);
+  y += 3;
 
+  const resultatTheorique = ep && ep.score_total
+    ? `${ep.score_brut}/${ep.score_total} (${Math.round((ep.taux || 0) * 100)} %)` : '—';
+  doc.autoTable({
+    startY: y, margin: { left: marge, right: marge }, theme: 'grid',
+    styles: { fontSize: 8.5, cellPadding: 2.2, valign: 'top' },
+    headStyles: { fillColor: [235, 238, 242], textColor: 20, fontStyle: 'bold' },
+    columnStyles: { 0: { cellWidth: 34 }, 1: { cellWidth: 28 }, 2: { cellWidth: 40 }, 3: { cellWidth: 30 } },
+    head: [['Formateur', 'Résultat théorique', 'Habilitation recommandée', 'Restrictions', 'Observations']],
+    body: [
+      [S.profil ? `${S.profil.nom || ''} ${S.profil.prenom || ''}`.trim() : '—',
+        resultatTheorique, habilitationRecommandee, '', ''],
+      [{ content: '', colSpan: 5, styles: { minCellHeight: 10 } }],
+    ],
+  });
+  y = doc.lastAutoTable.finalY + 2;
+
+  doc.autoTable({
+    startY: y, margin: { left: marge, right: marge }, theme: 'grid',
+    styles: { fontSize: 8.5, cellPadding: 2.2 },
+    columnStyles: { 0: { cellWidth: largeurUtile * 0.55 }, 1: { cellWidth: largeurUtile * 0.45 } },
+    body: [[`Date de l'avis : ${dateFr(new Date().toISOString())}`, 'Signature formateur :']],
+  });
+  y = doc.lastAutoTable.finalY + 5;
+
+  doc.setFont('helvetica', 'normal').setFontSize(7.3).setTextColor(60);
+  doc.text(
+    'L\'avis d\'habilitation délivré par le formateur ne vaut ni certification, ni habilitation. Il '
+    + 'constitue un élément sur lequel l\'employeur pourra fonder sa décision d\'habiliter le salarié, '
+    + 'en complément de la connaissance par l\'employeur des compétences du salarié, de son '
+    + 'environnement de travail et de ses activités, de son aptitude médicale.',
+    marge, y, { maxWidth: largeurUtile, lineHeightFactor: 1.3 });
+  y += 11;
+  doc.setFont('helvetica', 'bold');
+  doc.text('L\'habilitation est accordée par l\'employeur.', marge, y);
+  doc.setTextColor(0);
+  y += 6;
+
+  doc.autoTable({
+    startY: y, margin: { left: marge, right: marge }, theme: 'grid',
+    styles: { fontSize: 8.5, cellPadding: 2.2 },
+    body: [
+      [`ORGANISME DE FORMATION : ${org.raison_sociale || ''}`],
+      [`RESPONSABLE : ${[org.signataire_nom, org.signataire_fonction].filter(Boolean).join(' — ')}`],
+      [{ content: `Date : ……………………………          Signature et cachet de l'organisme :`, styles: { minCellHeight: 18 } }],
+    ],
+  });
+  y = doc.lastAutoTable.finalY + 6;
+
+  /* ---- Tableau d'avis d'habilitation (Annexe C) : Personnel × Symbole × Champ ---- */
   const domaines = (titre.domaines || []).join(', ') || '—';
   const installations = titre.ouvrages || '—';
   const indications = titre.indications || '—';
-
   const ligneAvis = lt => {
     const symboles = (lignes[lt.code] || []).join(', ');
     return [lt.libelle, symboles || '—',
@@ -151,7 +160,7 @@ async function genererTitrePdf(stagiaireId) {
       ...elec.map(ligneAvis),
     ],
   });
-  y = doc.lastAutoTable.finalY + 8;
+  y = doc.lastAutoTable.finalY + 6;
 
   doc.setFontSize(7).setTextColor(90);
   doc.text('La rubrique « indications supplémentaires » doit être obligatoirement renseignée le cas '
@@ -159,8 +168,64 @@ async function genererTitrePdf(stagiaireId) {
     + 'propre chef les opérations pour lesquelles il est habilité.', marge, y, { maxWidth: largeurUtile });
   doc.setTextColor(0);
 
+  /* ================= TITRE (carte à découper, bas de page) ================= */
+  // Hauteur fixe, ancrée au bas de la page : position de coupe identique
+  // d'un document à l'autre. Si l'avis ci-dessus déborde, la carte passe
+  // en bas de la page suivante plutôt que de chevaucher le tableau.
+  const hauteurCarte = 66;
+  if (y > hauteurPage - hauteurCarte - 6) doc.addPage();
+  const yCarte = hauteurPage - hauteurCarte;
+
+  doc.setDrawColor(120).setLineDashPattern([2, 1.5], 0);
+  doc.line(marge, yCarte, largeur - marge, yCarte);
+  doc.setLineDashPattern([], 0);
+  doc.setFontSize(7).setTextColor(110).setFont('helvetica', 'italic');
+  doc.text('✂ découper ici — carte à remettre au titulaire', largeur / 2, yCarte - 1.5, { align: 'center' });
+  doc.setTextColor(0);
+
+  const yc = yCarte + 6;
+  const colTitulaire = marge;
+  const colEmployeur = marge + largeurUtile * 0.34;
+  const colAvis = marge + largeurUtile * 0.66;
+  const largeurColAvis = largeurUtile * 0.34;
+
+  doc.setFont('helvetica', 'bold').setFontSize(11);
+  doc.text('TITRE D\'HABILITATION ÉLECTRIQUE', largeur / 2, yc, { align: 'center' });
+  doc.setFontSize(7.5).setFont('helvetica', 'normal');
+  doc.text('NF C18-510 — ' + (org.raison_sociale || ''), largeur / 2, yc + 4, { align: 'center' });
+
+  doc.setFont('helvetica', 'bold').setFontSize(8.5);
+  doc.text('LE TITULAIRE', colTitulaire, yc + 11);
+  doc.setFont('helvetica', 'normal').setFontSize(7.8);
+  doc.text('Nom : ' + (st.nom || ''), colTitulaire, yc + 16);
+  doc.text('Prénom : ' + (st.prenom || ''), colTitulaire, yc + 20);
+  doc.text('Signature :', colTitulaire, yc + 24);
+  if (st.signature_data) doc.addImage(st.signature_data, 'PNG', colTitulaire + 18, yc + 21, 28, 9);
+
+  doc.setFont('helvetica', 'bold').setFontSize(8.5);
+  doc.text('L\'EMPLOYEUR', colEmployeur, yc + 11);
+  doc.setFont('helvetica', 'normal').setFontSize(7.8);
+  doc.text('Société : ' + (org.raison_sociale || ''), colEmployeur, yc + 16);
+  doc.text('Nom : ' + (org.signataire_nom || ''), colEmployeur, yc + 20);
+  doc.text('Signature :', colEmployeur, yc + 24);
+  if (org.signature_data) doc.addImage(org.signature_data, 'PNG', colEmployeur + 18, yc + 21, 28, 9);
+
+  doc.setFont('helvetica', 'bold').setFontSize(8.5);
+  doc.text('AVIS', colAvis, yc + 11);
+  doc.setFont('helvetica', 'normal').setFontSize(6.2);
+  doc.text(
+    'Ce titre est établi et signé par l\'employeur puis remis à l\'intéressé qui doit également le '
+    + 'signer. Strictement personnel, il ne peut être remis à un tiers.',
+    colAvis, yc + 15, { maxWidth: largeurColAvis, lineHeightFactor: 1.2 });
+
+  doc.setFontSize(7.5).setFont('helvetica', 'bold');
+  doc.text('Délivré le ' + dateFr(titre.delivre_le), colTitulaire, yc + 34);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Validité : ' + (org.validite_annees || 3) + ' ans — à recycler avant le '
+    + dateFr(titre.recycler_avant), colTitulaire, yc + 38);
+
   doc.save(`titre_habilitation_${st.nom}_${st.prenom}.pdf`.replace(/\s+/g, '_'));
-  toast('Titre d\'habilitation généré');
+  toast('Titre et avis d\'habilitation générés');
 }
 
 /* ------------------- 2. Avis défavorable ---------------------------- */
