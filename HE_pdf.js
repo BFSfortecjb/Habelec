@@ -11,6 +11,18 @@
 
 const { jsPDF } = window.jspdf;
 
+// Numéro de version du générateur de PDF, affiché en tout petit en bas de
+// chaque page du titre/avis — sert uniquement à vérifier visuellement,
+// après un déploiement, que le navigateur a bien chargé le dernier
+// HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
+// modification notable de ce fichier ; aucun effet fonctionnel.
+const PDF_VERSION = 'v6-2026-08-05';
+
+function piedDeVersion(doc, largeur, hauteurPage, marge) {
+  doc.setFont('helvetica', 'normal').setFontSize(6).setTextColor(180, 180, 180);
+  doc.text(PDF_VERSION, largeur - marge, hauteurPage - 4, { align: 'right' });
+}
+
 // Charte graphique Univers BFS (commune à toutes les applis) : jaune #f3ab12,
 // rouge #b2181a, gris #464645, noir #080808. Police Montserrat côté web ;
 // jsPDF ne l'embarque pas nativement (police non fournie/licenciée pour PDF),
@@ -187,6 +199,8 @@ async function genererTitrePdf(stagiaireId) {
     + 'échéant. Cette habilitation n\'autorise pas à elle seule son titulaire à effectuer de son '
     + 'propre chef les opérations pour lesquelles il est habilité.', marge, y, { maxWidth: largeurUtile });
 
+  piedDeVersion(doc, largeur, hauteurPage, marge);
+
   // Repère de découpe sur la page 1 (recto), à la MÊME hauteur que sur la
   // page 2 (verso) ci-dessous — la zone sous ce trait reste vide sur le
   // recto, pour que la découpe ne coupe aucun contenu de l'avis. Si l'avis
@@ -259,6 +273,8 @@ async function genererTitrePdf(stagiaireId) {
   doc.setFont('helvetica', 'normal');
   doc.text('Validité : ' + (org.validite_annees || 3) + ' ans — à recycler avant le '
     + dateFr(titre.recycler_avant), colTitulaire, yc + 38);
+
+  piedDeVersion(doc, largeur, hauteurPage, marge);
 
   doc.save(`titre_habilitation_${st.nom}_${st.prenom}.pdf`.replace(/\s+/g, '_'));
   toast('Titre et avis d\'habilitation générés');
