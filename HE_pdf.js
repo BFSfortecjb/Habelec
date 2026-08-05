@@ -16,7 +16,7 @@ const { jsPDF } = window.jspdf;
 // après un déploiement, que le navigateur a bien chargé le dernier
 // HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
 // modification notable de ce fichier ; aucun effet fonctionnel.
-const PDF_VERSION = 'v6-2026-08-05';
+const PDF_VERSION = 'v7-2026-08-05';
 
 function piedDeVersion(doc, largeur, hauteurPage, marge) {
   doc.setFont('helvetica', 'normal').setFontSize(6).setTextColor(180, 180, 180);
@@ -89,7 +89,15 @@ async function genererTitrePdf(stagiaireId) {
   // Zone de découpe : même hauteur (66 mm) et même position, ancrée en bas de
   // page, sur la page 1 (recto) ET la page 2 (verso) — indispensable pour que
   // le cut recto verso tombe au même endroit des deux côtés de la feuille.
-  const hauteurCarte = 66;
+  // 58 mm : suffisant pour le contenu de la carte (~50 mm) tout en laissant
+  // le trait de coupe juste sous le tableau Personnel × Symbole de la page 1
+  // (qui occupe la quasi-totalité de la page — voir mesures 2026-08-05,
+  // PDF_VERSION v7). Avec 66 mm le trait tombait systématiquement DANS le
+  // texte de la page 1 et le repère de découpe n'était donc jamais dessiné
+  // sur le recto (la garde-fou `if (y < yCarte - 3)` le supprimait à chaque
+  // fois) — seul le verso montrait un trait, d'où l'impression de hauteurs
+  // différentes.
+  const hauteurCarte = 58;
   const yCarte = hauteurPage - hauteurCarte;
 
   /* ================= AVIS D'HABILITATION ================= */
@@ -123,7 +131,7 @@ async function genererTitrePdf(stagiaireId) {
     body: [
       [S.profil ? `${S.profil.nom || ''} ${S.profil.prenom || ''}`.trim() : '—',
         resultatTheorique, habilitationRecommandee, '', ''],
-      [{ content: '', colSpan: 5, styles: { minCellHeight: 10 } }],
+      [{ content: '', colSpan: 5, styles: { minCellHeight: 4 } }],
     ],
   });
   y = doc.lastAutoTable.finalY + 2;
@@ -146,7 +154,7 @@ async function genererTitrePdf(stagiaireId) {
   y += 11;
   doc.setFont('helvetica', 'bold').setTextColor(...BFS.noir);
   doc.text('L\'habilitation est accordée par l\'employeur.', marge, y);
-  y += 6;
+  y += 5;
 
   doc.autoTable({
     startY: y, margin: { left: marge, right: marge }, theme: 'grid',
@@ -154,10 +162,10 @@ async function genererTitrePdf(stagiaireId) {
     body: [
       [`ORGANISME DE FORMATION : ${org.raison_sociale || ''}`],
       [`RESPONSABLE : ${[org.signataire_nom, org.signataire_fonction].filter(Boolean).join(' — ')}`],
-      [{ content: `Date : ……………………………          Signature et cachet de l'organisme :`, styles: { minCellHeight: 18 } }],
+      [{ content: `Date : ……………………………          Signature et cachet de l'organisme :`, styles: { minCellHeight: 10 } }],
     ],
   });
-  y = doc.lastAutoTable.finalY + 6;
+  y = doc.lastAutoTable.finalY + 4;
 
   /* ---- Tableau d'avis d'habilitation (Annexe C) : Personnel × Symbole × Champ ---- */
   const domaines = (titre.domaines || []).join(', ') || '—';
@@ -192,7 +200,7 @@ async function genererTitrePdf(stagiaireId) {
       ...elec.map(ligneAvis),
     ],
   });
-  y = doc.lastAutoTable.finalY + 6;
+  y = doc.lastAutoTable.finalY + 4;
 
   doc.setFontSize(7).setTextColor(...BFS.gris);
   doc.text('La rubrique « indications supplémentaires » doit être obligatoirement renseignée le cas '
