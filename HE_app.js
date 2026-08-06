@@ -145,14 +145,35 @@ async function nouvelleSession() {
   }
   const intitule = prompt('Intitulé de la session :', 'Habilitation électrique — ' + new Date().getFullYear());
   if (!intitule) return;
+  const lieu = await demanderLieuFormation();
+  if (lieu === null) return;
   const code = genererCodeAcces();
   const { error } = await sb.from('sessions_formation').insert({
     organisme_id: S.organisme.id, formateur_id: S.profil.id,
-    intitule, numero_session_galaxy: numeroGalaxy.trim(), code_acces: code, statut: 'brouillon',
+    intitule, numero_session_galaxy: numeroGalaxy.trim(), code_acces: code, statut: 'brouillon', lieu,
   });
   if (error) return erreurSupabase('Création de la session', error);
   toast('Session créée — code d\'accès ' + code);
   rendreSessions($('#contenu'));
+}
+
+// Lieu de la formation (Briec / Sèvremont) : détermine la marque et le
+// téléphone affichés sur le volet 3 du titre d'habilitation (voir
+// HE_pdf.js, constante SITES). Valeurs stockées telles quelles dans
+// sessions_formation.lieu — pas d'enum SQL, juste ces deux libellés exacts.
+async function demanderLieuFormation(valeurActuelle) {
+  let choix = null;
+  while (choix === null) {
+    const reponse = prompt(
+      'Lieu de la formation — tape B pour Briec ou S pour Sèvremont :',
+      valeurActuelle === 'Sèvremont' ? 'S' : 'B');
+    if (reponse === null) return null; // annulé
+    const c = reponse.trim().toUpperCase();
+    if (c === 'B') choix = 'Briec';
+    else if (c === 'S') choix = 'Sèvremont';
+    else toast('Réponds B (Briec) ou S (Sèvremont)', 'erreur');
+  }
+  return choix;
 }
 
 async function modifierNumeroGalaxy() {
@@ -161,6 +182,14 @@ async function modifierNumeroGalaxy() {
   const { error } = await sb.from('sessions_formation')
     .update({ numero_session_galaxy: numeroGalaxy.trim() }).eq('id', S.session.id);
   if (error) return erreurSupabase('Modification du n° Galaxy', error);
+  await ouvrirSession(S.session.id);
+}
+
+async function modifierLieuFormation() {
+  const lieu = await demanderLieuFormation(S.session.lieu);
+  if (lieu === null) return;
+  const { error } = await sb.from('sessions_formation').update({ lieu }).eq('id', S.session.id);
+  if (error) return erreurSupabase('Modification du lieu', error);
   await ouvrirSession(S.session.id);
 }
 
@@ -237,6 +266,8 @@ async function rendreDetailSession(zone) {
         <button class="lien" onclick="telechargerQrPassation()">Télécharger l'image</button></div>
       <div><b>N° de session Galaxy</b><div>${esc(s.numero_session_galaxy) || '<i>non renseigné</i>'}</div>
         <button class="lien" onclick="modifierNumeroGalaxy()">Modifier</button></div>
+      <div><b>Lieu de la formation</b><div>${esc(s.lieu) || '<i>non renseigné</i>'}</div>
+        <button class="lien" onclick="modifierLieuFormation()">Modifier</button></div>
       <div><b>Règle de réussite</b>
         <div>${Math.round(s.seuil_global * 100)} % de bonnes réponses
           ${s.exiger_fondamentales ? '<br>+ 100 % des questions fondamentales' : ''}</div></div>

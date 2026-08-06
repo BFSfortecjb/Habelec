@@ -16,7 +16,7 @@ const { jsPDF } = window.jspdf;
 // après un déploiement, que le navigateur a bien chargé le dernier
 // HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
 // modification notable de ce fichier ; aucun effet fonctionnel.
-const PDF_VERSION = 'v9-2026-08-05';
+const PDF_VERSION = 'v11-2026-08-06';
 
 function piedDeVersion(doc, largeur, hauteurPage, marge) {
   doc.setFont('helvetica', 'normal').setFontSize(6).setTextColor(180, 180, 180);
@@ -235,13 +235,31 @@ async function genererTitrePdf(stagiaireId) {
   doc.text('La rubrique « indications supplémentaires » doit être obligatoirement renseignée le cas '
     + 'échéant. Cette habilitation n\'autorise pas à elle seule son titulaire à effectuer de son '
     + 'propre chef les opérations pour lesquelles il est habilité.', marge, yTableau, { maxWidth: largeurUtile });
+  yTableau += 6;
+
+  // Rappel des seuils de domaine de tension (alternatif / continu) — repris
+  // tel quel du modèle Excel « Titre_habilitation_autovf.xlsx » fourni par
+  // Jeremy (onglet Titre, lignes 14-15).
+  doc.setFont('helvetica', 'bold').setFontSize(6).setTextColor(...BFS.noir);
+  doc.text('Domaine de tension :', marge, yTableau);
+  doc.setFont('helvetica', 'normal').setFontSize(5.8).setTextColor(...BFS.gris);
+  doc.text('Alternatif : TBT ≤ 50 V // 50 V < BT ≤ 1 000 V // 1 000 V < HTA ≤ 50 000 V // HTB > 50 000 V',
+    marge + 30, yTableau);
+  doc.text('Continu : TBT ≤ 120 V // 120 V < BT ≤ 1 500 V // 1 500 V < HTA ≤ 75 000 V // HTB > 75 000 V',
+    marge + 30, yTableau + 3.5);
 
   piedDeVersion(doc, largeur, hauteurPage, marge);
 
-  /* ================= TITRE — VERSO (carte, page 2) ================= */
-  // Toujours sur sa propre page, à la MÊME hauteur yCarte que le recto —
-  // c'est la carte compacte remise au titulaire, imprimée au dos du tableau
-  // ci-dessus une fois la bande découpée.
+  /* ================= TITRE — VERSO (carte 3 volets, page 2) ===========
+   * Bande destinée à être découpée puis pliée en 3 (comme un dépliant),
+   * demande de Jeremy 2026-08-06. Ordre gauche → droite :
+   *   volet 1 : titulaire + employeur (identité, signatures)
+   *   volet 2 : texte réglementaire « AVIS » (repris du modèle fourni)
+   *   volet 3 : logo BFS, encadré « TITRE D'HABILITATION ÉLECTRIQUE
+   *             NF C18-510 », puis la marque et le téléphone du site où la
+   *             formation a eu lieu (Bretagne Formation Sécurité / Briec ou
+   *             Bocage Formation Sécurité / Sèvremont — champ
+   *             sessions_formation.lieu, saisi à la création de la session). */
   doc.addPage();
 
   doc.setDrawColor(...BFS.gris).setLineDashPattern([2, 1.5], 0);
@@ -250,51 +268,83 @@ async function genererTitrePdf(stagiaireId) {
   doc.setFontSize(7).setTextColor(...BFS.gris).setFont('helvetica', 'italic');
   doc.text('✂ découper ici — verso du titre (à remettre au titulaire)', largeur / 2, yCarte - 1.5, { align: 'center' });
 
-  const yc = yCarte + 6;
-  const colTitulaire = marge;
-  const colEmployeur = marge + largeurUtile * 0.34;
-  const colAvis = marge + largeurUtile * 0.66;
-  const largeurColAvis = largeurUtile * 0.34;
+  const SITES = {
+    'Briec': { marque: 'Bretagne Formation Sécurité', tel: '02 98 82 29 67' },
+    'Sèvremont': { marque: 'Bocage Formation Sécurité', tel: '02 51 57 75 65' },
+  };
+  const site = SITES[session?.lieu] || { marque: org.raison_sociale || '', tel: org.telephone || '' };
 
-  doc.addImage(LOGO_BFS, 'PNG', largeur / 2 - 10, yc - 2, 20, 20 * 119 / 222);
-  doc.setTextColor(...BFS.noir).setFont('helvetica', 'bold').setFontSize(11);
-  doc.text('TITRE D\'HABILITATION ÉLECTRIQUE', largeur / 2, yc + 11, { align: 'center' });
-  doc.setDrawColor(...BFS.jaune).setLineWidth(0.6)
-    .line(largeur / 2 - 16, yc + 12.4, largeur / 2 + 16, yc + 12.4);
-  doc.setLineWidth(0.2);
-  doc.setFontSize(7.5).setFont('helvetica', 'normal').setTextColor(...BFS.gris);
-  doc.text('NF C18-510 — ' + (org.raison_sociale || ''), largeur / 2, yc + 16.5, { align: 'center' });
-  doc.setTextColor(...BFS.noir);
+  const largeurVolet = largeurUtile / 3;
+  const xV1 = marge;
+  const xV2 = marge + largeurVolet;
+  const xV3 = marge + 2 * largeurVolet;
+  const zHaut = yCarte + 3;
+  const zBas = hauteurPage - 5;
 
-  doc.setFont('helvetica', 'bold').setFontSize(8.5);
-  doc.text('LE TITULAIRE', colTitulaire, yc + 22);
-  doc.setFont('helvetica', 'normal').setFontSize(7.8);
-  doc.text('Nom : ' + (st.nom || ''), colTitulaire, yc + 27);
-  doc.text('Prénom : ' + (st.prenom || ''), colTitulaire, yc + 31);
-  doc.text('Signature :', colTitulaire, yc + 35);
-  if (st.signature_data) doc.addImage(st.signature_data, 'PNG', colTitulaire + 18, yc + 32, 28, 9);
+  // Cadre extérieur + traits de pliage en pointillés entre les 3 volets.
+  doc.setDrawColor(...BFS.gris).setLineWidth(0.2);
+  doc.rect(marge, zHaut, largeurUtile, zBas - zHaut);
+  doc.setLineDashPattern([1.5, 1.2], 0);
+  doc.line(xV2, zHaut, xV2, zBas);
+  doc.line(xV3, zHaut, xV3, zBas);
+  doc.setLineDashPattern([], 0);
 
-  doc.setFont('helvetica', 'bold').setFontSize(8.5);
-  doc.text('L\'EMPLOYEUR', colEmployeur, yc + 22);
-  doc.setFont('helvetica', 'normal').setFontSize(7.8);
-  doc.text('Société : ' + (org.raison_sociale || ''), colEmployeur, yc + 27);
-  doc.text('Nom : ' + (org.signataire_nom || ''), colEmployeur, yc + 31);
-  doc.text('Signature :', colEmployeur, yc + 35);
-  if (org.signature_data) doc.addImage(org.signature_data, 'PNG', colEmployeur + 18, yc + 32, 28, 9);
+  /* ---- Volet 1 : titulaire + employeur ---- */
+  const xc1 = xV1 + largeurVolet / 2;
+  doc.setTextColor(...BFS.noir).setFont('helvetica', 'bold').setFontSize(8);
+  doc.text('LE TITULAIRE', xc1, zHaut + 6, { align: 'center' });
+  doc.setFont('helvetica', 'normal').setFontSize(7.5);
+  doc.text('Nom : ' + (st.nom || ''), xV1 + 3, zHaut + 12);
+  doc.text('Prénom : ' + (st.prenom || ''), xV1 + 3, zHaut + 16);
+  doc.text('Signature :', xV1 + 3, zHaut + 20);
+  if (st.signature_data) doc.addImage(st.signature_data, 'PNG', xV1 + 3, zHaut + 22, 28, 9);
 
-  doc.setFont('helvetica', 'bold').setFontSize(8.5);
-  doc.text('AVIS', colAvis, yc + 22);
-  doc.setFont('helvetica', 'normal').setFontSize(6.2);
-  doc.text(
-    'Ce titre est établi et signé par l\'employeur puis remis à l\'intéressé qui doit également le '
-    + 'signer. Strictement personnel, il ne peut être remis à un tiers.',
-    colAvis, yc + 26, { maxWidth: largeurColAvis, lineHeightFactor: 1.2 });
+  doc.setFont('helvetica', 'bold').setFontSize(8);
+  doc.text('L\'EMPLOYEUR', xc1, zHaut + 40, { align: 'center' });
+  doc.setFont('helvetica', 'normal').setFontSize(7.5);
+  doc.text('Société : ' + (org.raison_sociale || ''), xV1 + 3, zHaut + 46);
+  doc.text('Nom : ' + (org.signataire_nom || ''), xV1 + 3, zHaut + 50);
+  doc.text('Signature :', xV1 + 3, zHaut + 54);
+  if (org.signature_data) doc.addImage(org.signature_data, 'PNG', xV1 + 3, zHaut + 56, 28, 9);
 
-  doc.setFontSize(7.5).setFont('helvetica', 'bold');
-  doc.text('Délivré le ' + dateFr(titre.delivre_le), colTitulaire, yc + 45);
+  doc.setFont('helvetica', 'bold').setFontSize(7);
+  doc.text('Délivré le ' + dateFr(titre.delivre_le), xV1 + 3, zBas - 6);
   doc.setFont('helvetica', 'normal');
   doc.text('Validité : ' + (org.validite_annees || 3) + ' ans — à recycler avant le '
-    + dateFr(titre.recycler_avant), colTitulaire, yc + 49);
+    + dateFr(titre.recycler_avant), xV1 + 3, zBas - 2.5, { maxWidth: largeurVolet - 6 });
+
+  /* ---- Volet 2 : texte réglementaire AVIS ---- */
+  const xc2 = xV2 + largeurVolet / 2;
+  doc.setTextColor(...BFS.noir).setFont('helvetica', 'bold').setFontSize(9);
+  doc.text('AVIS', xc2, zHaut + 6, { align: 'center' });
+  doc.setFont('helvetica', 'normal').setFontSize(6);
+  doc.text(
+    'Le présent titre d\'habilitation est établi et signé par l\'employeur puis remis à l\'intéressé '
+    + 'qui doit également le signer.\n'
+    + 'Ce titre est strictement personnel et ne peut être utilisé par un tiers.\n'
+    + 'Le titulaire doit être porteur de ce titre pendant les heures de travail ou le conserver à sa '
+    + 'portée et être en mesure de le présenter sur demande motivée.\n'
+    + 'Ce titre doit comporter les indications précises correspondant aux 3 caractères et à l\'attribut '
+    + 'composant le symbole de chaque habilitation et celles relatives aux activités que le personnel '
+    + 'sera autorisé à pratiquer.\n'
+    + 'La rubrique « indications supplémentaires » doit obligatoirement être remplie.',
+    xV2 + 3, zHaut + 12, { maxWidth: largeurVolet - 6, lineHeightFactor: 1.25 });
+
+  /* ---- Volet 3 : logo, encadré titre, marque et téléphone du site ---- */
+  const xc3 = xV3 + largeurVolet / 2;
+  const largeurLogo = 26;
+  doc.addImage(LOGO_BFS, 'PNG', xc3 - largeurLogo / 2, zHaut + 4, largeurLogo, largeurLogo * 119 / 222);
+  const yEncadre = zHaut + 4 + largeurLogo * 119 / 222 + 5;
+  doc.setDrawColor(...BFS.jaune).setLineWidth(0.5).rect(xV3 + 4, yEncadre, largeurVolet - 8, 16);
+  doc.setTextColor(...BFS.noir).setFont('helvetica', 'bold').setFontSize(8.5);
+  doc.text('TITRE D\'HABILITATION\nÉLECTRIQUE', xc3, yEncadre + 6, { align: 'center', lineHeightFactor: 1.15 });
+  doc.setFont('helvetica', 'normal').setFontSize(7.5);
+  doc.text('NF C18-510', xc3, yEncadre + 13.5, { align: 'center' });
+
+  doc.setFont('helvetica', 'bold').setFontSize(7.5).setTextColor(...BFS.noir);
+  doc.text(site.marque, xc3, yEncadre + 24, { align: 'center', maxWidth: largeurVolet - 6 });
+  doc.setFont('helvetica', 'normal').setFontSize(7).setTextColor(...BFS.gris);
+  doc.text(site.tel, xc3, yEncadre + 29, { align: 'center' });
 
   piedDeVersion(doc, largeur, hauteurPage, marge);
 
