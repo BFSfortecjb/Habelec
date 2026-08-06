@@ -16,7 +16,7 @@ const { jsPDF } = window.jspdf;
 // après un déploiement, que le navigateur a bien chargé le dernier
 // HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
 // modification notable de ce fichier ; aucun effet fonctionnel.
-const PDF_VERSION = 'v11-2026-08-06';
+const PDF_VERSION = 'v12-2026-08-06';
 
 function piedDeVersion(doc, largeur, hauteurPage, marge) {
   doc.setFont('helvetica', 'normal').setFontSize(6).setTextColor(180, 180, 180);
@@ -187,7 +187,7 @@ async function genererTitrePdf(stagiaireId) {
     doc.line(marge, yCarte, largeur - marge, yCarte);
     doc.setLineDashPattern([], 0);
     doc.setFontSize(7).setTextColor(...BFS.gris).setFont('helvetica', 'italic');
-    doc.text('✂ découper ici (même hauteur qu\'au verso)', largeur / 2, yCarte - 1.5, { align: 'center' });
+    doc.text('découper ici (même hauteur qu\'au verso)', largeur / 2, yCarte - 1.5, { align: 'center' });
   }
 
   /* ================= TITRE — RECTO (tableau Annexe C, bas de page 1) =====
@@ -243,9 +243,9 @@ async function genererTitrePdf(stagiaireId) {
   doc.setFont('helvetica', 'bold').setFontSize(6).setTextColor(...BFS.noir);
   doc.text('Domaine de tension :', marge, yTableau);
   doc.setFont('helvetica', 'normal').setFontSize(5.8).setTextColor(...BFS.gris);
-  doc.text('Alternatif : TBT ≤ 50 V // 50 V < BT ≤ 1 000 V // 1 000 V < HTA ≤ 50 000 V // HTB > 50 000 V',
+  doc.text('Alternatif : TBT <= 50 V // 50 V < BT <= 1 000 V // 1 000 V < HTA <= 50 000 V // HTB > 50 000 V',
     marge + 30, yTableau);
-  doc.text('Continu : TBT ≤ 120 V // 120 V < BT ≤ 1 500 V // 1 500 V < HTA ≤ 75 000 V // HTB > 75 000 V',
+  doc.text('Continu : TBT <= 120 V // 120 V < BT <= 1 500 V // 1 500 V < HTA <= 75 000 V // HTB > 75 000 V',
     marge + 30, yTableau + 3.5);
 
   piedDeVersion(doc, largeur, hauteurPage, marge);
@@ -266,7 +266,7 @@ async function genererTitrePdf(stagiaireId) {
   doc.line(marge, yCarte, largeur - marge, yCarte);
   doc.setLineDashPattern([], 0);
   doc.setFontSize(7).setTextColor(...BFS.gris).setFont('helvetica', 'italic');
-  doc.text('✂ découper ici — verso du titre (à remettre au titulaire)', largeur / 2, yCarte - 1.5, { align: 'center' });
+  doc.text('découper ici — verso du titre (à remettre au titulaire)', largeur / 2, yCarte - 1.5, { align: 'center' });
 
   const SITES = {
     'Briec': { marque: 'Bretagne Formation Sécurité', tel: '02 98 82 29 67' },
