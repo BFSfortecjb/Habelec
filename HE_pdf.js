@@ -16,7 +16,7 @@ const { jsPDF } = window.jspdf;
 // après un déploiement, que le navigateur a bien chargé le dernier
 // HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
 // modification notable de ce fichier ; aucun effet fonctionnel.
-const PDF_VERSION = 'v12-2026-08-06';
+const PDF_VERSION = 'v13-2026-08-06';
 
 function piedDeVersion(doc, largeur, hauteurPage, marge) {
   doc.setFont('helvetica', 'normal').setFontSize(6).setTextColor(180, 180, 180);
@@ -88,6 +88,23 @@ async function genererTitrePdf(stagiaireId) {
   const lignes = c.lignes || {};
   const habilitationRecommandee = Object.values(lignes).flat().join(', ') || '—';
 
+  // Détail par titre visé (2026-08-12) : % de réussite théorique et score aux
+  // questions fondamentales, sur le même périmètre que theorie_gabarit_ok()
+  // (tronc commun + thèmes propres au gabarit) — sert à justifier sur le
+  // document la réussite ou l'échec de l'évaluation théorique, plus le
+  // résultat de l'épreuve pratique du même titre. Demande de Jeremy.
+  const gabaritsVises = ep?.gabarits || [];
+  const [detailsTheorie, { data: pratiques }] = await Promise.all([
+    Promise.all(gabaritsVises.map(g =>
+      rpc('theorie_gabarit_detail', { p_epreuve_id: ep.id, p_gabarit_code: g }).catch(() => null))),
+    gabaritsVises.length
+      ? sb.from('epreuves_pratiques').select('gabarit_code, reussie')
+          .eq('stagiaire_id', stagiaireId).in('gabarit_code', gabaritsVises)
+      : Promise.resolve({ data: [] }),
+  ]);
+  const detailParGabarit = Object.fromEntries(gabaritsVises.map((g, i) => [g, detailsTheorie[i]]));
+  const pratiqueParGabarit = Object.fromEntries((pratiques || []).map(p => [p.gabarit_code, p.reussie]));
+
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const largeur = 210, hauteurPage = 297, marge = 12, largeurUtile = largeur - 2 * marge;
   let y = marge;
@@ -144,6 +161,38 @@ async function genererTitrePdf(stagiaireId) {
   });
   y = doc.lastAutoTable.finalY + 2;
 
+  // Détail par titre visé : justifie la réussite ou l'échec de l'évaluation
+  // théorique (% et fondamentales) et résume la pratique, titre par titre —
+  // le tableau ci-dessus n'affiche qu'un score global agrégé.
+  if (gabaritsVises.length) {
+    doc.autoTable({
+      startY: y, margin: { left: marge, right: marge }, theme: 'grid',
+      styles: { fontSize: 8, cellPadding: 1.8, valign: 'middle' },
+      headStyles: { fillColor: BFS.grisClair, textColor: BFS.noir, fontStyle: 'bold' },
+      columnStyles: {
+        0: { cellWidth: largeurUtile * 0.28 },
+        1: { cellWidth: largeurUtile * 0.24, halign: 'center' },
+        2: { cellWidth: largeurUtile * 0.24, halign: 'center' },
+        3: { cellWidth: largeurUtile * 0.24, halign: 'center' },
+      },
+      head: [['Titre visé', 'Résultat théorique', 'Questions fondamentales', 'Épreuve pratique']],
+      body: gabaritsVises.map(g => {
+        const d = detailParGabarit[g];
+        const pratOk = pratiqueParGabarit[g];
+        const fond = !d ? '—'
+          : d.fond_total === 0 ? 'aucune exigée'
+          : `${d.fond_justes}/${d.fond_total}${d.fond_ok ? '' : ' (insuffisant)'}`;
+        return [
+          libelleGabarit(g),
+          d ? `${d.justes}/${d.total} (${d.taux} %)` : '—',
+          fond,
+          pratOk === true ? 'validée' : pratOk === false ? 'non validée' : 'en attente',
+        ];
+      }),
+    });
+    y = doc.lastAutoTable.finalY + 4;
+  }
+
   doc.autoTable({
     startY: y, margin: { left: marge, right: marge }, theme: 'grid',
     styles: { fontSize: 8.5, cellPadding: 2.2 },
@@ -152,14 +201,14 @@ async function genererTitrePdf(stagiaireId) {
   });
   y = doc.lastAutoTable.finalY + 5;
 
-  doc.setFont('helvetica', 'normal').setFontSize(7.3).setTextColor(...BFS.gris);
+  doc.setFont('helvetica', 'normal').setFontSize(8.5).setTextColor(...BFS.gris);
   doc.text(
     'L\'avis d\'habilitation délivré par le formateur ne vaut ni certification, ni habilitation. Il '
     + 'constitue un élément sur lequel l\'employeur pourra fonder sa décision d\'habiliter le salarié, '
     + 'en complément de la connaissance par l\'employeur des compétences du salarié, de son '
     + 'environnement de travail et de ses activités, de son aptitude médicale.',
     marge, y, { maxWidth: largeurUtile, lineHeightFactor: 1.3 });
-  y += 11;
+  y += 13;
   doc.setFont('helvetica', 'bold').setTextColor(...BFS.noir);
   doc.text('L\'habilitation est accordée par l\'employeur.', marge, y);
   y += 5;
