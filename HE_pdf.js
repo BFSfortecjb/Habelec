@@ -16,7 +16,7 @@ const { jsPDF } = window.jspdf;
 // après un déploiement, que le navigateur a bien chargé le dernier
 // HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
 // modification notable de ce fichier ; aucun effet fonctionnel.
-const PDF_VERSION = 'v13-2026-08-06';
+const PDF_VERSION = 'v14-2026-08-06';
 
 function piedDeVersion(doc, largeur, hauteurPage, marge) {
   doc.setFont('helvetica', 'normal').setFontSize(6).setTextColor(180, 180, 180);
@@ -105,6 +105,22 @@ async function genererTitrePdf(stagiaireId) {
   const detailParGabarit = Object.fromEntries(gabaritsVises.map((g, i) => [g, detailsTheorie[i]]));
   const pratiqueParGabarit = Object.fromEntries((pratiques || []).map(p => [p.gabarit_code, p.reussie]));
 
+  // Nombre de questions fondamentales AFFICHÉ = le total normatif propre à CE
+  // titre (Annexe D.3), pas le total réellement tiré dans l'examen. Quand un
+  // stagiaire vise plusieurs titres à la fois, plan_tirage() mutualise les
+  // thèmes communs (zones, dangers...) en gardant le quota le plus exigeant :
+  // un titre "léger" partagé avec un titre plus exigeant se retrouve avec
+  // plus de questions fondamentales dans SON examen que ce que la norme
+  // demande pour lui seul. Afficher ce total mutualisé sur l'avis aurait été
+  // trompeur (chiffre qui ne correspond à aucune référence documentée) — d'où
+  // ce recalcul depuis gabarit_quotas (S.referentiel, déjà en mémoire), sans
+  // toucher à la validation elle-même (theorie_gabarit_ok reste inchangée,
+  // décision de Jeremy 2026-08-06 : ne corriger que l'affichage pour l'instant).
+  const fondNormeParGabarit = Object.fromEntries(gabaritsVises.map(g => [g,
+    (S.referentiel?.quotas || [])
+      .filter(q => q.gabarit_code === g)
+      .reduce((somme, q) => somme + (q.nb_fondamentales || 0), 0)]));
+
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const largeur = 210, hauteurPage = 297, marge = 12, largeurUtile = largeur - 2 * marge;
   let y = marge;
@@ -179,9 +195,15 @@ async function genererTitrePdf(stagiaireId) {
       body: gabaritsVises.map(g => {
         const d = detailParGabarit[g];
         const pratOk = pratiqueParGabarit[g];
-        const fond = !d ? '—'
-          : d.fond_total === 0 ? 'aucune exigée'
-          : `${d.fond_justes}/${d.fond_total}${d.fond_ok ? '' : ' (insuffisant)'}`;
+        const refFond = fondNormeParGabarit[g] || 0;
+        // Nombre normatif (Annexe D.3) propre au titre, pas le total mutualisé
+        // avec d'éventuels autres titres visés dans le même examen — voir le
+        // commentaire sur fondNormeParGabarit ci-dessus. La qualification
+        // (toutes justes / insuffisant) vient bien du résultat réel du
+        // stagiaire (d.fond_ok), la validation n'est pas modifiée.
+        const fond = refFond === 0 ? 'aucune exigée'
+          : !d ? `${refFond} requise(s)`
+          : `${refFond} requise(s) — ${d.fond_ok ? 'toutes justes' : 'insuffisant'}`;
         return [
           libelleGabarit(g),
           d ? `${d.justes}/${d.total} (${d.taux} %)` : '—',
