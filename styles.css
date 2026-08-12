@@ -337,6 +337,25 @@ details h4 { margin-top: 14px; font-size: 13px; color: var(--gris-doux); }
 .toast.erreur { background: var(--rouge); }
 .toast.sortie { opacity: 0; }
 
+/* ------------------------ mode hors-ligne (2026-08) ------------------------ */
+#bandeau-hors-ligne {
+  position: sticky; top: 0; z-index: 300; text-align: center;
+  padding: 8px 14px; font-size: .92rem; font-weight: 600; color: #fff;
+  background: var(--gris-fonce);
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+}
+#bandeau-hors-ligne.synchro { background: var(--jaune-fonce); color: var(--noir); }
+#bandeau-hors-ligne.conflit { background: var(--rouge); }
+#bandeau-hors-ligne button.lien { color: inherit; text-decoration: underline; font-weight: 700; }
+
+.conflits-hl { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
+.conflits-hl li { border: 1px solid var(--gris-bord); border-radius: 8px; padding: 10px 12px; }
+.actions-conflit { display: flex; gap: 10px; margin-top: 8px; }
+.actions-conflit button.principal, .actions-conflit button:not(.lien) {
+  background: var(--jaune); color: var(--noir); border: none; border-radius: 6px;
+  padding: 6px 12px; font-weight: 600; cursor: pointer;
+}
+
 /* ----------------------------- debug ------------------------------- */
 #debug-panel {
   position: fixed; bottom: 0; left: 0; right: 0; max-height: 45vh; overflow: auto;

@@ -1,0 +1,82 @@
+/* =====================================================================
+   sw.js — service worker de l'app shell (2026-08)
+
+   Rôle unique : permettre à l'application de se CHARGER sans réseau (ex.
+   onglet rouvert en atelier sans connexion). Les données (Supabase) ne
+   passent PAS par ce service worker — c'est HE_offline.js qui gère leur
+   mise en cache et leur synchronisation, à un niveau applicatif. Ici on ne
+   met en cache que les fichiers same-origin de l'appli elle-même (JS/CSS/
+   HTML), jamais les requêtes vers Supabase ni vers les CDN externes (dont
+   le navigateur gère déjà le cache HTTP normalement).
+
+   Règle commune Univers BFS : le dépôt est partagé entre plusieurs applis
+   sur bfsfortecjb.github.io — CE fichier DOIT être enregistré avec
+   `scope: './'` (voir HE_config.js / index.html), jamais '/', sous peine de
+   prendre le contrôle des autres applis du portail.
+
+   À faire à chaque déploiement qui change un fichier listé ci-dessous :
+   incrémenter CACHE_VERSION, sans quoi les navigateurs déjà installés
+   garderaient l'ancienne version en cache indéfiniment.
+   ===================================================================== */
+
+const CACHE_VERSION = 'habelec-shell-v1';
+
+const FICHIERS_APP_SHELL = [
+  './',
+  './index.html',
+  './styles.css',
+  './HE_config.js',
+  './HE_debug.js',
+  './HE_core.js',
+  './HE_offline.js',
+  './HE_qcm.js',
+  './HE_pratique.js',
+  './HE_pdf.js',
+  './HE_app.js',
+];
+
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE_VERSION)
+      .then(cache => cache.addAll(FICHIERS_APP_SHELL))
+      .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys()
+      .then(noms => Promise.all(
+        noms.filter(n => n !== CACHE_VERSION).map(n => caches.delete(n))
+      ))
+      .then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+
+  // Seulement le same-origin, seulement en GET : jamais Supabase, jamais les
+  // CDN externes, jamais les mutations (POST/PATCH/...).
+  if (url.origin !== self.location.origin || event.request.method !== 'GET') return;
+
+  event.respondWith(
+    caches.match(event.request).then(reponseEnCache => {
+      // Rafraîchit le cache en tâche de fond dès qu'une réponse réseau valide
+      // arrive (stale-while-revalidate) — l'appli n'a pas besoin d'être à la
+      // seconde près, mais un déploiement doit finir par se propager. waitUntil
+      // garde le service worker actif le temps de cette écriture, même quand
+      // on a déjà répondu depuis le cache ci-dessous.
+      const rafraichissement = fetch(event.request).then(reponse => {
+        if (reponse && reponse.ok) {
+          caches.open(CACHE_VERSION).then(cache => cache.put(event.request, reponse.clone()));
+        }
+        return reponse;
+      }).catch(() => null);
+      event.waitUntil(rafraichissement);
+
+      // Cache-first : réponse immédiate si on l'a déjà, sinon on attend le réseau.
+      return reponseEnCache || rafraichissement || fetch(event.request);
+    })
+  );
+});

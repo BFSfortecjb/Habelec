@@ -28,11 +28,25 @@
 <script src="HE_config.js"></script>
 <script src="HE_debug.js"></script>
 <script src="HE_core.js"></script>
+<script src="HE_offline.js"></script>
 <script src="HE_qcm.js"></script>
 <script src="HE_pratique.js"></script>
 <script src="HE_pdf.js"></script>
 <script src="HE_app.js"></script>
-<script>document.addEventListener('DOMContentLoaded', demarrer);</script>
+<script>
+document.addEventListener('DOMContentLoaded', () => { HorsLigne.init(); demarrer(); });
+
+// Mode hors-ligne (2026-08) : permet à l'appli de se recharger sans réseau
+// (écran pratique déjà mis en cache — voir HE_offline.js). scope: './'
+// obligatoire — plusieurs applis BFS partagent le même domaine GitHub Pages,
+// un service worker à la racine prendrait le contrôle des autres.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js', { scope: './' })
+      .catch(err => console.warn('Service worker non installé :', err));
+  });
+}
+</script>
 
 </body>
 </html>

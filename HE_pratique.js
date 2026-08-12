@@ -44,28 +44,57 @@ async function rendrePratique(zone) {
   const scrollY = window.scrollY;
   if (!dejaAffiche) zone.innerHTML = '<p class="chargement">Préparation des grilles…</p>';
 
-  // Crée les épreuves manquantes (une par gabarit visé) et pré-remplit les grilles
-  try { await rpc('preparer_pratiques', { p_stagiaire_id: st.id }); }
-  catch (e) { return erreurSupabase('Préparation des épreuves pratiques', e); }
+  // Mode hors-ligne (2026-08) : source de lecture selon la connectivité —
+  // voir HE_offline.js. En ligne, on lit le serveur et on rafraîchit le
+  // cache local à chaque succès ; hors-ligne (ou si le réseau tombe pendant
+  // la lecture), on retombe sur ce cache. Sans cache disponible hors-ligne,
+  // rien à afficher pour ce stagiaire tant qu'il n'a pas été ouvert en ligne.
+  let epreuves, scenarios, theorieOkParSymbole;
 
-  const { data: epreuves, error } = await sb.from('epreuves_pratiques')
-    .select(`*, gabarits(libelle, mises_en_situation_min, mises_en_situation_rattrapage,
-               tableau_savoir_faire, competences),
-             mises_en_situation(id, numero, intitule, commentaire, scenario_id,
-               evaluations_savoir_faire(id, note, commentaire,
-                 gabarit_savoir_faire(id, position, criteres_savoir_faire(code, libelle))))`)
-    .eq('stagiaire_id', st.id).order('gabarit_code');
-  if (error) return erreurSupabase('Lecture des épreuves pratiques', error);
+  if (navigator.onLine) {
+    try {
+      // Crée les épreuves manquantes (une par gabarit visé) et pré-remplit les grilles
+      await rpc('preparer_pratiques', { p_stagiaire_id: st.id });
 
-  const { data: scenarios } = await sb.from('scenarios_pratiques')
-    .select('*').eq('actif', true);
+      const { data, error } = await sb.from('epreuves_pratiques')
+        .select(`*, gabarits(libelle, mises_en_situation_min, mises_en_situation_rattrapage,
+                   tableau_savoir_faire, competences),
+                 mises_en_situation(id, numero, intitule, commentaire, scenario_id,
+                   evaluations_savoir_faire(id, note, commentaire,
+                     gabarit_savoir_faire(id, position, criteres_savoir_faire(code, libelle))))`)
+        .eq('stagiaire_id', st.id).order('gabarit_code');
+      if (error) throw error;
+      epreuves = data;
 
-  // Un titre dont la théorie a échoué n'a plus besoin d'être évalué en pratique
-  // (sauf rattrapage théorique à venir) : la carte du titre passe en orange
-  // plutôt qu'en rouge, pour signaler « optionnel » et non « à faire ».
-  const { data: resultats } = await sb.from('resultats_symbole')
-    .select('symbole_code, theorie_ok').eq('stagiaire_id', st.id);
-  const theorieOkParSymbole = Object.fromEntries((resultats || []).map(r => [r.symbole_code, r.theorie_ok]));
+      const { data: scen } = await sb.from('scenarios_pratiques').select('*').eq('actif', true);
+      scenarios = scen || [];
+
+      // Un titre dont la théorie a échoué n'a plus besoin d'être évalué en pratique
+      // (sauf rattrapage théorique à venir) : la carte du titre passe en orange
+      // plutôt qu'en rouge, pour signaler « optionnel » et non « à faire ».
+      const { data: resultats } = await sb.from('resultats_symbole')
+        .select('symbole_code, theorie_ok').eq('stagiaire_id', st.id);
+      theorieOkParSymbole = Object.fromEntries((resultats || []).map(r => [r.symbole_code, r.theorie_ok]));
+
+      HorsLigne.enregistrerSnapshot(st.id, { epreuves, scenarios, theorieOkParSymbole });
+    } catch (e) {
+      const snap = HorsLigne.lireSnapshot(st.id);
+      if (!snap) return erreurSupabase('Lecture des épreuves pratiques', e);
+      ({ epreuves, scenarios, theorieOkParSymbole } = snap);
+      toast('Connexion perdue — grilles rechargées depuis la dernière sauvegarde locale', 'erreur', 6000);
+    }
+  } else {
+    const snap = HorsLigne.lireSnapshot(st.id);
+    if (!snap) {
+      zone.innerHTML = `<div class="ecran-vide"><h1>Hors connexion</h1>
+        <p>Aucune donnée locale pour ${esc(st.prenom)} ${esc(st.nom)} : ouvre son écran pratique une
+        première fois en ligne avant de perdre le réseau.</p>
+        <button class="lien" onclick="retour('session')">← Retour à la session</button></div>`;
+      return;
+    }
+    ({ epreuves, scenarios, theorieOkParSymbole } = snap);
+  }
+
   const symbolesStagiaire = (st.stagiaire_symboles || []).map(x => x.symbole_code);
   const theorieEchoueePourGabarit = gabaritCode => symbolesStagiaire.some(sym =>
     (S.referentiel.gabaritsParSymbole[sym] || []).includes(gabaritCode) && theorieOkParSymbole[sym] === false);
@@ -74,7 +103,8 @@ async function rendrePratique(zone) {
     <button class="lien" onclick="retour('session')">← Retour à la session</button>
     <div class="barre-actions">
       <h2>Évaluation pratique — ${esc(st.prenom)} ${esc(st.nom)}</h2>
-      <button class="principal" onclick="genererTitrePdf('${st.id}')">🏅 Générer le titre</button>
+      <button class="principal" ${navigator.onLine ? '' : 'disabled title="Indisponible hors-ligne"'}
+        onclick="genererTitrePdf('${st.id}')">🏅 Générer le titre</button>
     </div>
     <p class="aide">Barème normatif : <b>A</b> sans erreur · <b>B</b> erreur minime ·
        <b>C</b> erreur majeure · <b>D</b> erreur grave.
@@ -124,7 +154,8 @@ function carteEpreuve(ep, scenarios, theorieEchouee) {
           ? `<span class="etat avertissement" title="La théorie de ce titre a échoué : la pratique n'est pas nécessaire, sauf si un rattrapage théorique est prévu.">
               ⚠ Théorie non validée — pratique optionnelle</span>`
           : `<span class="etat ${ep.reussie === true ? 'ok' : ep.reussie === false ? 'ko' : 'neutre'}">
-              ${ep.reussie === true ? 'Validée' : ep.reussie === false ? 'Non validée' : 'En cours'}</span>`}
+              ${ep.reussie === true ? 'Validée' : ep.reussie === false ? 'Non validée' : 'En cours'}
+              ${ep.__provisoire ? ' (provisoire, hors-ligne)' : ''}</span>`}
       </div>
       <p class="aide">Compétences à évaluer :
         ${(ep.gabarits.competences || []).map(c => `<span class="puce">${esc(c)}</span>`).join(' ')}
@@ -245,7 +276,40 @@ function grilleMise(m, scenarios, obligatoire) {
     </div>`;
 }
 
+/* --------------------- mode hors-ligne : accès au cache ---------------- *
+ * Localise une ligne (épreuve / mise / évaluation) dans le snapshot du
+ * stagiaire actuellement affiché, pour la modifier en mémoire avant de la
+ * remettre en cache — voir HE_offline.js pour la file d'attente elle-même.
+ * ------------------------------------------------------------------------ */
+function trouverDansCache(quoi, id) {
+  const snap = HorsLigne.lireSnapshot(S.stagiaire.id);
+  if (!snap) return null;
+  for (const ep of snap.epreuves || []) {
+    if (quoi === 'epreuve' && ep.id === id) return { snap, ep };
+    for (const m of ep.mises_en_situation || []) {
+      if (quoi === 'mise' && m.id === id) return { snap, ep, m };
+      for (const l of m.evaluations_savoir_faire || []) {
+        if (quoi === 'ligne' && l.id === id) return { snap, ep, m, l };
+      }
+    }
+  }
+  return null;
+}
+
 async function noter(ligneId, note) {
+  if (!navigator.onLine) {
+    const trouve = trouverDansCache('ligne', ligneId);
+    if (!trouve) return toast('Ligne introuvable dans les données locales', 'erreur');
+    const valeurAvant = { note: trouve.l.note };
+    trouve.l.note = note;
+    HorsLigne.enregistrerSnapshot(S.stagiaire.id, trouve.snap);
+    HorsLigne.ecrireChamp({
+      table: 'evaluations_savoir_faire', pk: ligneId, champs: { note }, valeurAvant,
+      libelle: 'Note ' + note + ' — ' + trouve.l.gabarit_savoir_faire.criteres_savoir_faire.code,
+      stagiaireId: S.stagiaire.id,
+    });
+    return rendrePratique($('#contenu'));
+  }
   const { error } = await sb.from('evaluations_savoir_faire')
     .update({ note }).eq('id', ligneId);
   if (error) return erreurSupabase('Notation', error);
@@ -253,14 +317,56 @@ async function noter(ligneId, note) {
 }
 
 async function commenterLigne(ligneId, texte) {
+  if (!navigator.onLine) {
+    const trouve = trouverDansCache('ligne', ligneId);
+    if (!trouve) return toast('Ligne introuvable dans les données locales', 'erreur');
+    const valeurAvant = { commentaire: trouve.l.commentaire };
+    trouve.l.commentaire = texte;
+    HorsLigne.enregistrerSnapshot(S.stagiaire.id, trouve.snap);
+    HorsLigne.ecrireChamp({
+      table: 'evaluations_savoir_faire', pk: ligneId, champs: { commentaire: texte }, valeurAvant,
+      libelle: 'Commentaire — ' + trouve.l.gabarit_savoir_faire.criteres_savoir_faire.code,
+      stagiaireId: S.stagiaire.id,
+    });
+    return;
+  }
   await sb.from('evaluations_savoir_faire').update({ commentaire: texte }).eq('id', ligneId);
 }
 
 async function majObservations(epreuveId, texte) {
+  if (!navigator.onLine) {
+    const trouve = trouverDansCache('epreuve', epreuveId);
+    if (!trouve) return toast('Épreuve introuvable dans les données locales', 'erreur');
+    const valeurAvant = { observations: trouve.ep.observations };
+    trouve.ep.observations = texte;
+    HorsLigne.enregistrerSnapshot(S.stagiaire.id, trouve.snap);
+    HorsLigne.ecrireChamp({
+      table: 'epreuves_pratiques', pk: epreuveId, champs: { observations: texte }, valeurAvant,
+      libelle: 'Observations — ' + trouve.ep.gabarits.libelle, stagiaireId: S.stagiaire.id,
+    });
+    return;
+  }
   await sb.from('epreuves_pratiques').update({ observations: texte }).eq('id', epreuveId);
 }
 
 async function appliquerScenario(miseId, scenarioId) {
+  if (!navigator.onLine) {
+    const trouve = trouverDansCache('mise', miseId);
+    if (!trouve) return toast('Mise en situation introuvable dans les données locales', 'erreur');
+    const valeurAvant = { scenario_id: trouve.m.scenario_id, intitule: trouve.m.intitule };
+    const maj = { scenario_id: scenarioId || null };
+    if (scenarioId) {
+      const scenario = (trouve.snap.scenarios || []).find(s => s.id === scenarioId);
+      if (scenario) maj.intitule = scenario.intitule;
+    }
+    Object.assign(trouve.m, maj);
+    HorsLigne.enregistrerSnapshot(S.stagiaire.id, trouve.snap);
+    HorsLigne.ecrireChamp({
+      table: 'mises_en_situation', pk: miseId, champs: maj, valeurAvant,
+      libelle: 'Scénario — mise en situation ' + trouve.m.numero, stagiaireId: S.stagiaire.id,
+    });
+    return rendrePratique($('#contenu'));
+  }
   const maj = { scenario_id: scenarioId || null };
   if (scenarioId) {
     const { data } = await sb.from('scenarios_pratiques').select('intitule').eq('id', scenarioId).single();
@@ -272,6 +378,35 @@ async function appliquerScenario(miseId, scenarioId) {
 }
 
 async function ajouterMise(epreuveId, numero, gabaritCode) {
+  if (!navigator.onLine) {
+    const trouve = trouverDansCache('epreuve', epreuveId);
+    if (!trouve) return toast('Épreuve introuvable dans les données locales', 'erreur');
+    const miseId = crypto.randomUUID();
+    const lignesRef = S.referentiel.savoirFaire.filter(sf => sf.gabarit_code === gabaritCode);
+    const nouvelleMise = {
+      id: miseId, numero, intitule: 'Mise en situation ' + numero, commentaire: '', scenario_id: null,
+      evaluations_savoir_faire: lignesRef.map(sf => ({
+        id: crypto.randomUUID(), note: null, commentaire: '',
+        gabarit_savoir_faire: { id: sf.id, position: sf.position, criteres_savoir_faire: sf.criteres_savoir_faire },
+        __savoir_faire_id: sf.id,
+      })),
+    };
+    trouve.ep.mises_en_situation = [...(trouve.ep.mises_en_situation || []), nouvelleMise];
+    HorsLigne.enregistrerSnapshot(S.stagiaire.id, trouve.snap);
+    HorsLigne.inserer({
+      table: 'mises_en_situation',
+      lignes: [{ id: miseId, epreuve_id: epreuveId, numero, intitule: nouvelleMise.intitule }],
+      libelle: 'Ajout mise en situation ' + numero, stagiaireId: S.stagiaire.id,
+    });
+    HorsLigne.inserer({
+      table: 'evaluations_savoir_faire',
+      lignes: nouvelleMise.evaluations_savoir_faire.map(l => ({
+        id: l.id, mise_en_situation_id: miseId, savoir_faire_id: l.__savoir_faire_id,
+      })),
+      libelle: 'Grille — mise en situation ' + numero, stagiaireId: S.stagiaire.id,
+    });
+    return rendrePratique($('#contenu'));
+  }
   const { data, error } = await sb.from('mises_en_situation')
     .insert({ epreuve_id: epreuveId, numero, intitule: 'Mise en situation ' + numero })
     .select().single();
@@ -282,7 +417,40 @@ async function ajouterMise(epreuveId, numero, gabaritCode) {
   rendrePratique($('#contenu'));
 }
 
+// Réplique en JS, pour l'usage hors-ligne uniquement, la règle SQL de
+// epreuve_pratique_conforme() (voir supabase/_fonctions.sql) : obligatoires
+// conformes, sinon une seule mise de rattrapage conforme suffit. Retourne
+// null si les obligatoires ne sont pas toutes complètes (rien à décider).
+function conformiteLocale(ep) {
+  const min = ep.gabarits.mises_en_situation_min;
+  const rattrapage = ep.gabarits.mises_en_situation_rattrapage || 0;
+  const mises = ep.mises_en_situation || [];
+  const obligatoires = mises.filter(m => m.numero <= min);
+  if (obligatoires.length < min || !obligatoires.every(m => miseComplete(m))) return null;
+  if (obligatoires.every(m => miseConforme(m))) return true;
+  const rattrapages = mises.filter(m => m.numero > min && m.numero <= min + rattrapage);
+  return rattrapages.some(m => miseConforme(m));
+}
+
 async function cloturerEpreuve(epreuveId) {
+  if (!navigator.onLine) {
+    const trouve = trouverDansCache('epreuve', epreuveId);
+    if (!trouve) return toast('Épreuve introuvable dans les données locales', 'erreur');
+    const verdict = conformiteLocale(trouve.ep);
+    if (verdict === null) {
+      return toast('Mise(s) en situation obligatoire(s) pas toutes complètes', 'erreur');
+    }
+    trouve.ep.reussie = verdict;
+    trouve.ep.__provisoire = true;
+    HorsLigne.enregistrerSnapshot(S.stagiaire.id, trouve.snap);
+    HorsLigne.appellerRpc({
+      nomRpc: 'cloturer_pratique', params: { p_epreuve_id: epreuveId },
+      libelle: 'Clôture — ' + trouve.ep.gabarits.libelle, stagiaireId: S.stagiaire.id,
+    });
+    toast((verdict ? 'Épreuve pratique validée' : 'Épreuve pratique non validée')
+      + ' — provisoire, à confirmer à la reconnexion', verdict ? 'ok' : 'erreur');
+    return rendrePratique($('#contenu'));
+  }
   try {
     const ok = await rpc('cloturer_pratique', { p_epreuve_id: epreuveId });
     toast(ok ? 'Épreuve pratique validée' : 'Épreuve pratique non validée', ok ? 'ok' : 'erreur');
