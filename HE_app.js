@@ -10,6 +10,7 @@
      6. Onglet Banque de questions (couverture, import GIFT, relecture)
      7. Onglet Scénarios pratiques
      8. Onglet Organisme
+     9. Onglet Comptes
    ===================================================================== */
 
 /* ====================== 1. Connexion ================================ */
@@ -57,11 +58,12 @@ const ONGLETS = {
   scenarios: 'Mises en situation',
   titres:    'Titres',
   organisme: 'Organisme',
+  comptes:   'Comptes',
 };
 
 // Onglets réservés à l'administrateur (réglages qui touchent tous les organismes
 // ou tous les stagiaires, pas seulement l'organisme courant)
-const ONGLETS_ADMIN = new Set(['titres', 'organisme']);
+const ONGLETS_ADMIN = new Set(['titres', 'organisme', 'comptes']);
 
 function ongletsVisibles() {
   const liste = Object.entries(ONGLETS);
@@ -75,6 +77,7 @@ const RENDU = {
   scenarios: rendreScenarios,
   titres:    rendreTitres,
   organisme: rendreOrganisme,
+  comptes:   rendreComptes,
   pratique:  rendrePratique,     // défini dans HE_pratique.js
 };
 
@@ -1361,6 +1364,82 @@ async function rendreOrganisme(zone) {
     if (error) return erreurSupabase('Enregistrement', error);
     toast('Organisme enregistré');
     await chargerProfil();
+  });
+}
+
+/* ============ 9. Onglet Comptes (admin) ============================= */
+/* Rattache un compte auth.users déjà créé (Portail, ou une autre brique
+ * Univers BFS) à Habelec, avec un rôle. Ne crée jamais de compte
+ * auth.users lui-même — voir MEMOIRE_PROJET.md, la création du compte
+ * brut est centralisée côté Portail. Idempotent côté serveur : cet écran
+ * peut être soumis plusieurs fois sans risque d'écraser un formateur déjà
+ * rattaché. */
+async function rendreComptes(zone) {
+  zone.innerHTML = '<p class="chargement">Chargement des comptes…</p>';
+  const [{ data: formateurs, error: err1 }, { data: organismes, error: err2 }] = await Promise.all([
+    sb.from('formateurs').select('*, organismes(raison_sociale)').order('email'),
+    sb.from('organismes').select('id, raison_sociale').order('raison_sociale'),
+  ]);
+  if (err1) return erreurSupabase('Lecture des comptes', err1);
+  if (err2) return erreurSupabase('Lecture des organismes', err2);
+
+  zone.innerHTML = `
+    <div class="barre-actions"><h2>Comptes</h2></div>
+    <p class="aide">Rattache ici un compte qui existe déjà quelque part dans
+       l'Univers BFS (créé via le Portail, ou sur une autre application) à
+       Habelec. Le compte doit déjà exister : cet écran ne crée aucun compte
+       <code>auth.users</code>, il ajoute seulement une ligne dans
+       <code>formateurs</code> pour l'autoriser ici.</p>
+    <form id="form-rattacher-compte" class="formulaire carte">
+      <div class="grille-2">
+        <label>Email du compte à rattacher
+          <input name="email" type="email" required autocomplete="off"></label>
+        <label>Rôle
+          <select name="role">
+            <option value="formateur">Formateur</option>
+            <option value="admin">Administrateur</option>
+          </select></label>
+        <label>Nom <input name="nom"></label>
+        <label>Prénom <input name="prenom"></label>
+        <label>Organisme
+          <select name="organisme_id">
+            <option value="">— aucun —</option>
+            ${(organismes || []).map(o => `<option value="${esc(o.id)}">${esc(o.raison_sociale)}</option>`).join('')}
+          </select></label>
+      </div>
+      <button class="principal" type="submit">Rattacher</button>
+    </form>
+    <table class="tableau">
+      <thead><tr><th>Email</th><th>Nom</th><th>Rôle</th><th>Organisme</th><th>Rattaché le</th></tr></thead>
+      <tbody>${(formateurs || []).map(f => `
+        <tr>
+          <td>${esc(f.email)}</td>
+          <td>${esc([f.prenom, f.nom].filter(Boolean).join(' '))}</td>
+          <td>${f.role === 'admin' ? 'Administrateur' : 'Formateur'}</td>
+          <td>${esc(f.organismes?.raison_sociale || '—')}</td>
+          <td>${dateFr(f.cree_le)}</td>
+        </tr>`).join('') || '<tr><td colspan="5" class="vide">Aucun compte rattaché pour le moment.</td></tr>'}
+      </tbody>
+    </table>`;
+
+  $('#form-rattacher-compte').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const f = ev.target;
+    const email = f.email.value.trim();
+    try {
+      const [resultat] = await rpc('rattacher_formateur_par_email', {
+        p_email:        email,
+        p_nom:          f.nom.value.trim() || null,
+        p_prenom:       f.prenom.value.trim() || null,
+        p_role:         f.role.value,
+        p_organisme_id: f.organisme_id.value || null,
+      });
+      toast(resultat.deja_existant
+        ? `${email} était déjà rattaché à Habelec — rien n'a été modifié`
+        : `${email} rattaché à Habelec`);
+      f.reset();
+      rendreComptes($('#contenu'));
+    } catch (e) { erreurSupabase('Rattachement du compte', e); }
   });
 }
 
