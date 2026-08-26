@@ -53,17 +53,18 @@ function ecranConnexion(cible) {
 
 /* ====================== 2. Coquille ================================= */
 const ONGLETS = {
-  sessions:  'Sessions',
-  banque:    'Banque de questions',
-  scenarios: 'Mises en situation',
-  titres:    'Titres',
-  organisme: 'Organisme',
-  comptes:   'Comptes',
+  sessions:      'Sessions',
+  banque:        'Banque de questions',
+  scenarios:     'Mises en situation',
+  titres:        'Titres',
+  verification:  'Vérification',
+  organisme:     'Organisme',
+  comptes:       'Comptes',
 };
 
 // Onglets réservés à l'administrateur (réglages qui touchent tous les organismes
 // ou tous les stagiaires, pas seulement l'organisme courant)
-const ONGLETS_ADMIN = new Set(['titres', 'organisme', 'comptes']);
+const ONGLETS_ADMIN = new Set(['titres', 'verification', 'organisme', 'comptes']);
 
 function ongletsVisibles() {
   const liste = Object.entries(ONGLETS);
@@ -71,14 +72,15 @@ function ongletsVisibles() {
 }
 
 const RENDU = {
-  sessions:  rendreSessions,
-  session:   rendreDetailSession,
-  banque:    rendreBanque,
-  scenarios: rendreScenarios,
-  titres:    rendreTitres,
-  organisme: rendreOrganisme,
-  comptes:   rendreComptes,
-  pratique:  rendrePratique,     // défini dans HE_pratique.js
+  sessions:     rendreSessions,
+  session:      rendreDetailSession,
+  banque:       rendreBanque,
+  scenarios:    rendreScenarios,
+  titres:       rendreTitres,
+  verification: rendreVerification,
+  organisme:    rendreOrganisme,
+  comptes:      rendreComptes,
+  pratique:     rendrePratique,     // défini dans HE_pratique.js
 };
 
 function ecranFormateur(cible) {

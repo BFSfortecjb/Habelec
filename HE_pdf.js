@@ -155,7 +155,14 @@ async function genererTitrePdf(stagiaireId) {
   y += 6;
   doc.text('Dates de la formation : ' + [dateFr(session?.date_debut), dateFr(session?.date_fin)]
     .filter(Boolean).join(' au '), marge, y);
-  y += 7;
+  y += 5;
+
+  // Numéro de vérification d'authenticité (2026-08-26) : imprimé sur l'avis
+  // ET sur le titre (recto tableau + verso carte, plus bas) — permet à un
+  // employeur de vérifier ce document via l'export de v_titres_verification.
+  doc.setFont('helvetica', 'bold').setFontSize(9);
+  doc.text('N° de vérification : ' + (titre.numero || '—'), marge, y);
+  y += 6;
 
   doc.setFont('helvetica', 'normal').setFontSize(9.5);
   doc.text('Résultats de l\'évaluation et avis d\'habilitation du formateur :', marge, y);
@@ -319,6 +326,9 @@ async function genererTitrePdf(stagiaireId) {
   doc.text('Continu : TBT <= 120 V // 120 V < BT <= 1 500 V // 1 500 V < HTA <= 75 000 V // HTB > 75 000 V',
     marge + 30, yTableau + 3.5);
 
+  doc.setFont('helvetica', 'bold').setFontSize(6).setTextColor(...BFS.noir);
+  doc.text('N° de vérification : ' + (titre.numero || '—'), largeur - marge, yTableau + 3.5, { align: 'right' });
+
   piedDeVersion(doc, largeur, hauteurPage, marge);
 
   /* ================= TITRE — VERSO (carte 3 volets, page 2) ===========
@@ -411,6 +421,9 @@ async function genererTitrePdf(stagiaireId) {
   doc.text('TITRE D\'HABILITATION\nÉLECTRIQUE', xc3, yEncadre + 6, { align: 'center', lineHeightFactor: 1.15 });
   doc.setFont('helvetica', 'normal').setFontSize(7.5);
   doc.text('NF C18-510', xc3, yEncadre + 13.5, { align: 'center' });
+  doc.setFont('helvetica', 'normal').setFontSize(6).setTextColor(...BFS.gris);
+  doc.text('N° ' + (titre.numero || '—'), xc3, yEncadre + 18.5, { align: 'center' });
+  doc.setTextColor(...BFS.noir);
 
   doc.setFont('helvetica', 'bold').setFontSize(7.5).setTextColor(...BFS.noir);
   doc.text(site.marque, xc3, yEncadre + 24, { align: 'center', maxWidth: largeurVolet - 6 });
