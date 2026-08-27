@@ -1436,22 +1436,32 @@ function exporterTitresVerification() {
  * rattaché. */
 async function rendreComptes(zone) {
   zone.innerHTML = '<p class="chargement">Chargement des comptes…</p>';
-  const [{ data: formateurs, error: err1 }, { data: organismes, error: err2 }] = await Promise.all([
+  const [{ data: formateurs, error: err1 }, { data: organismes, error: err2 }, comptesDisponibles] = await Promise.all([
     sb.from('formateurs').select('*, organismes(raison_sociale)').order('email'),
     sb.from('organismes').select('id, raison_sociale').order('raison_sociale'),
+    // Comptes de tout l'Univers BFS pas encore rattachés à Habelec (2026-08-27,
+    // demande de Jeremy) — pour le menu déroulant, évite la saisie manuelle.
+    rpc('lister_comptes_univers_bfs').catch(e => { erreurSupabase('Liste des comptes disponibles', e); return []; }),
   ]);
   if (err1) return erreurSupabase('Lecture des comptes', err1);
   if (err2) return erreurSupabase('Lecture des organismes', err2);
+
+  const optionsOrganisme = (organismes || []).map(o => `<option value="${esc(o.id)}">${esc(o.raison_sociale)}</option>`).join('');
 
   zone.innerHTML = `
     <div class="barre-actions"><h2>Comptes</h2></div>
     <p class="aide">Rattache ici un compte qui existe déjà quelque part dans
        l'Univers BFS (créé via le Portail, ou sur une autre application) à
-       Habelec. Le compte doit déjà exister : cet écran ne crée aucun compte
-       <code>auth.users</code>, il ajoute seulement une ligne dans
-       <code>formateurs</code> pour l'autoriser ici.</p>
+       Habelec. Le compte doit déjà exister : ce premier formulaire ne crée
+       aucun compte <code>auth.users</code>, il ajoute seulement une ligne
+       dans <code>formateurs</code> pour l'autoriser ici.</p>
     <form id="form-rattacher-compte" class="formulaire carte">
       <div class="grille-2">
+        <label>Compte existant (Univers BFS)
+          <select id="select-compte-existant">
+            <option value="">— choisir dans la liste, ou saisir un email ci-dessous —</option>
+            ${(comptesDisponibles || []).map(c => `<option value="${esc(c.email)}">${esc(c.email)}</option>`).join('')}
+          </select></label>
         <label>Email du compte à rattacher
           <input name="email" type="email" required autocomplete="off"></label>
         <label>Rôle
@@ -1464,11 +1474,36 @@ async function rendreComptes(zone) {
         <label>Organisme
           <select name="organisme_id">
             <option value="">— aucun —</option>
-            ${(organismes || []).map(o => `<option value="${esc(o.id)}">${esc(o.raison_sociale)}</option>`).join('')}
+            ${optionsOrganisme}
           </select></label>
       </div>
       <button class="principal" type="submit">Rattacher</button>
     </form>
+
+    <h3>Formateur externe à BFS (compte à créer)</h3>
+    <p class="aide">Réservé à quelqu'un qui n'utilisera jamais aucune autre application de
+       l'Univers BFS — sinon, fais-le créer via le Portail puis rattache-le ci-dessus.
+       Un email d'invitation est envoyé à la personne pour qu'elle choisisse elle-même
+       son mot de passe ; aucun mot de passe n'est généré ni affiché ici.</p>
+    <form id="form-creer-externe" class="formulaire carte">
+      <div class="grille-2">
+        <label>Email <input name="email" type="email" required autocomplete="off"></label>
+        <label>Rôle
+          <select name="role">
+            <option value="formateur">Formateur</option>
+            <option value="admin">Administrateur</option>
+          </select></label>
+        <label>Nom <input name="nom" required></label>
+        <label>Prénom <input name="prenom"></label>
+        <label>Organisme
+          <select name="organisme_id">
+            <option value="">— aucun —</option>
+            ${optionsOrganisme}
+          </select></label>
+      </div>
+      <button class="principal" type="submit">Créer le compte et l'inviter</button>
+    </form>
+
     <table class="tableau">
       <thead><tr><th>Email</th><th>Nom</th><th>Rôle</th><th>Organisme</th><th>Rattaché le</th></tr></thead>
       <tbody>${(formateurs || []).map(f => `
@@ -1481,6 +1516,10 @@ async function rendreComptes(zone) {
         </tr>`).join('') || '<tr><td colspan="5" class="vide">Aucun compte rattaché pour le moment.</td></tr>'}
       </tbody>
     </table>`;
+
+  $('#select-compte-existant').addEventListener('change', ev => {
+    if (ev.target.value) $('#form-rattacher-compte input[name="email"]').value = ev.target.value;
+  });
 
   $('#form-rattacher-compte').addEventListener('submit', async ev => {
     ev.preventDefault();
@@ -1500,6 +1539,37 @@ async function rendreComptes(zone) {
       f.reset();
       rendreComptes($('#contenu'));
     } catch (e) { erreurSupabase('Rattachement du compte', e); }
+  });
+
+  $('#form-creer-externe').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const f = ev.target;
+    const email = f.email.value.trim();
+    const bouton = f.querySelector('button');
+    bouton.disabled = true;
+    try {
+      // Edge Function dédiée (2026-08-27) : seul endroit détenant la clé
+      // service_role côté Habelec — jamais dans ce fichier JS.
+      const { data, error } = await sb.functions.invoke('habelec-creer-formateur-externe', {
+        body: {
+          email,
+          nom:           f.nom.value.trim(),
+          prenom:        f.prenom.value.trim() || null,
+          role:          f.role.value,
+          organisme_id:  f.organisme_id.value || null,
+        },
+      });
+      if (error) throw new Error(data?.error || error.message);
+      toast(data.deja_existant_ailleurs
+        ? `${email} existait déjà dans l'Univers BFS — rattaché à Habelec sans nouvel email envoyé`
+        : `Compte créé, email d'invitation envoyé à ${email}`);
+      f.reset();
+      rendreComptes($('#contenu'));
+    } catch (e) {
+      erreurSupabase('Création du formateur externe', e);
+    } finally {
+      bouton.disabled = false;
+    }
   });
 }
 
