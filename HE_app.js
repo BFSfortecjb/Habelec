@@ -1903,6 +1903,11 @@ function activerImage(id) {
   input.addEventListener('change', () => {
     const fichier = input.files[0];
     if (!fichier) return;
+    if (!fichier.type.startsWith('image/')) {
+      toast('Ce fichier n\'est pas une image (PNG ou JPEG attendu)', 'erreur');
+      input.value = '';
+      return;
+    }
     const lecteur = new FileReader();
     lecteur.onload = () => { img.src = lecteur.result; img.style.display = ''; };
     lecteur.readAsDataURL(fichier);

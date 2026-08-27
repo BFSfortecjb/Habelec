@@ -28,9 +28,26 @@ const PDF_VERSION = 'v14-2026-08-06';
 // peine d'exception "Incomplete or corrupt PNG file" si on lui ment.
 function formatImageDataUrl(dataUrl) {
   const m = /^data:image\/(\w+);base64,/.exec(dataUrl || '');
-  const type = (m ? m[1] : 'png').toLowerCase();
+  if (!m) return null;
+  const type = m[1].toLowerCase();
   if (type === 'jpg') return 'JPEG';
   return type.toUpperCase();
+}
+
+// Image "à risque" (signature ou cachet enregistrés par l'utilisateur, pas un
+// asset fixe de l'appli) : un format non supporté par jsPDF (webp, fichier pas
+// vraiment une image malgré l'extension...) ou des données corrompues ne
+// doivent JAMAIS empêcher la génération du reste du titre — on ignore juste
+// cette image-là, avec un avertissement en console (2026-08-27).
+function ajouterImageSure(doc, dataUrl, format, x, y, largeur, hauteur) {
+  if (!dataUrl) return;
+  const f = format || formatImageDataUrl(dataUrl);
+  if (!f) { console.warn('Image ignorée (format non reconnu) :', dataUrl.slice(0, 30)); return; }
+  try {
+    doc.addImage(dataUrl, f, x, y, largeur, hauteur);
+  } catch (e) {
+    console.warn('Image ignorée (fichier corrompu ou non supporté) :', e);
+  }
 }
 
 function piedDeVersion(doc, largeur, marge, yCarte) {
@@ -278,9 +295,8 @@ async function genererTitrePdf(stagiaireId) {
   // Signature du formateur, pré-enregistrée une fois depuis "Mon compte"
   // (2026-08-27, demande de Jeremy) : apposée automatiquement, plus besoin
   // de signer à la main à chaque avis.
-  if (S.profil?.signature_data) {
-    doc.addImage(S.profil.signature_data, 'PNG', marge + largeurUtile * 0.55 + 28, doc.lastAutoTable.finalY - 9, 26, 8);
-  }
+  ajouterImageSure(doc, S.profil?.signature_data, null,
+    marge + largeurUtile * 0.55 + 28, doc.lastAutoTable.finalY - 9, 26, 8);
   y = doc.lastAutoTable.finalY + 5;
 
   doc.setFont('helvetica', 'normal').setFontSize(8.5).setTextColor(...BFS.gris);
@@ -310,8 +326,8 @@ async function genererTitrePdf(stagiaireId) {
   // automatiquement sur chaque avis. L'employeur, lui, continue de signer à
   // la main sur le titre (voir plus bas, volet "L'EMPLOYEUR").
   const yLigneOrg = doc.lastAutoTable.finalY - 11;
-  if (org.signature_data) doc.addImage(org.signature_data, 'PNG', largeur - marge - 55, yLigneOrg, 26, 9);
-  if (org.cachet_data) doc.addImage(org.cachet_data, formatImageDataUrl(org.cachet_data), largeur - marge - 24, yLigneOrg - 2, 20, 15);
+  ajouterImageSure(doc, org.signature_data, null, largeur - marge - 55, yLigneOrg, 26, 9);
+  ajouterImageSure(doc, org.cachet_data, null, largeur - marge - 24, yLigneOrg - 2, 20, 15);
   y = doc.lastAutoTable.finalY + 4;
 
   // Marges réduites pour la carte titre (recto + verso, la bande découpée
@@ -445,7 +461,7 @@ async function genererTitrePdf(stagiaireId) {
   doc.text('Nom : ' + (st.nom || ''), xV1 + 3, zHaut + 12);
   doc.text('Prénom : ' + (st.prenom || ''), xV1 + 3, zHaut + 16);
   doc.text('Signature :', xV1 + 3, zHaut + 20);
-  if (st.signature_data) doc.addImage(st.signature_data, 'PNG', xV1 + 3, zHaut + 22, 28, 9);
+  ajouterImageSure(doc, st.signature_data, null, xV1 + 3, zHaut + 22, 28, 9);
 
   doc.setFont('helvetica', 'bold').setFontSize(8);
   doc.text('L\'EMPLOYEUR', xc1, zHaut + 40, { align: 'center' });
