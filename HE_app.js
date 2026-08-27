@@ -1369,6 +1369,64 @@ async function rendreOrganisme(zone) {
   });
 }
 
+/* ============ 8 bis. Onglet Vérification (admin) ======================
+ * Liste des titres délivrés avec leur numéro d'authenticité (HE-AAAA-
+ * <n° session Galaxy>-NNN, voir patch_2026-08-26) + export Excel destiné
+ * à alimenter la base externe de vérification consultée par les employeurs.
+ * Demande de Jeremy (2026-08-26). Portée par la vue v_titres_verification
+ * (RLS : même périmètre organisme que partout ailleurs). */
+async function rendreVerification(zone) {
+  zone.innerHTML = '<p class="chargement">Chargement des titres délivrés…</p>';
+  const { data, error } = await sb.from('v_titres_verification').select('*')
+    .order('delivre_le', { ascending: false });
+  if (error) return erreurSupabase('Lecture des titres délivrés', error);
+
+  S._titresVerification = data || [];
+
+  zone.innerHTML = `
+    <div class="barre-actions"><h2>Vérification d'authenticité</h2>
+      <button onclick="exporterTitresVerification()">⬇️ Exporter en Excel (${data.length})</button>
+    </div>
+    <p class="aide">Chaque titre délivré porte un numéro unique (ex. HE-2026-4521-001), imprimé sur
+      l'avis et sur le titre remis au stagiaire. Cet export alimente la base externe de vérification
+      d'authenticité consultée par les employeurs — à réexporter et retransmettre après chaque session.</p>
+    <table class="tableau">
+      <thead><tr><th>N° de vérification</th><th>Nom</th><th>Prénom</th><th>Session</th>
+        <th>N° session Galaxy</th><th>Date de délivrance</th><th>À recycler avant</th></tr></thead>
+      <tbody>${data.map(t => `
+        <tr>
+          <td>${esc(t.numero)}</td>
+          <td>${esc(t.nom)}</td>
+          <td>${esc(t.prenom)}</td>
+          <td>${esc(t.session || '—')}</td>
+          <td>${esc(t.numero_session_galaxy || '—')}</td>
+          <td>${dateFr(t.delivre_le)}</td>
+          <td>${dateFr(t.recycler_avant)}</td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+}
+
+function exporterTitresVerification() {
+  const data = S._titresVerification || [];
+  if (!data.length) return toast('Rien à exporter');
+  const lignes = data.map(t => ({
+    'Numéro de vérification': t.numero,
+    'Nom': t.nom,
+    'Prénom': t.prenom,
+    'Organisme': t.organisme,
+    'Session': t.session,
+    'N° session Galaxy': t.numero_session_galaxy,
+    'Symboles': (t.symboles || []).join(', '),
+    'Date de délivrance': dateFr(t.delivre_le),
+    'À recycler avant': dateFr(t.recycler_avant),
+  }));
+  const ws = XLSX.utils.json_to_sheet(lignes);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Titres');
+  XLSX.writeFile(wb, `export_verification_titres_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  toast('Export généré');
+}
+
 /* ============ 9. Onglet Comptes (admin) ============================= */
 /* Rattache un compte auth.users déjà créé (Portail, ou une autre brique
  * Univers BFS) à Habelec, avec un rôle. Ne crée jamais de compte
