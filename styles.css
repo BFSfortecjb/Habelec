@@ -204,7 +204,7 @@ label.case input { width: auto; margin: 0; accent-color: var(--jaune); }
   padding: 14px 18px; border-bottom: 3px solid var(--jaune);
 }
 .entete-modale h3 { margin: 0; color: var(--gris); }
-.corps-modale { padding: 18px; }
+.corps-modale { padding: 18px; overflow-x: hidden; }
 .pied-modale { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
 /* ------------------------- copie corrigée -------------------------- */
@@ -223,8 +223,11 @@ ol.copie ul { list-style: none; padding-left: 4px; margin: 4px 0; }
 ol.copie ul li { font-size: 14px; color: var(--gris); }
 ol.copie ul li.bonne { color: var(--vert); font-weight: 700; }
 ol.copie ul li.cochee { background: var(--jaune-fond); border-radius: 4px; padding: 0 4px; }
-.ligne-actions-avalider { display: flex; align-items: flex-end; gap: 12px; margin-top: 6px; }
-.ligne-actions-avalider label { font-size: 13px; }
+.ligne-actions-avalider { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin-top: 6px; }
+.ligne-actions-avalider label { font-size: 13px; display: flex; align-items: center; gap: 6px;
+  flex: 1 1 220px; min-width: 0; }
+.ligne-actions-avalider select { flex: 1 1 auto; min-width: 0; max-width: 100%; }
+.ligne-actions-avalider button { flex: 0 0 auto; }
 ol.copie li.vide { list-style: none; text-align: center; color: var(--gris-doux); font-style: italic; padding: 16px 0; }
 .explication { font-size: 13px; color: var(--gris-doux); font-style: italic; margin: 4px 0 0; }
 
