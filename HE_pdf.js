@@ -334,7 +334,7 @@ async function genererTitrePdf(stagiaireId) {
       [`ORGANISME DE FORMATION : ${org.raison_sociale || ''}`],
       [`RESPONSABLE : ${[org.signataire_nom, org.signataire_fonction].filter(Boolean).join(' — ')}`],
       [{ content: `Date : ${dateFr(new Date().toISOString())}          Signature et cachet de l'organisme :`,
-         styles: { minCellHeight: 28 } }],
+         styles: { minCellHeight: 30 } }],
     ],
   });
   // Signature + cachet du représentant de l'organisme, pré-enregistrés une
@@ -344,10 +344,9 @@ async function genererTitrePdf(stagiaireId) {
   // Cachet agrandi 3x (2026-08-27, demande de Jeremy) — la ligne du tableau
   // grandit avec lui (minCellHeight ci-dessus) pour ne rien chevaucher.
   ajouterImageSure(doc, org.signature_data, null, largeur - marge - 55, doc.lastAutoTable.finalY - 11, 26, 9);
-  // Taille réduite (2026-08-27, retour de Jeremy : trop gros, poussait le
-  // reste du contenu sur le trait de découpe qui n'était alors plus dessiné
-  // en bas de page). Garde de la marge respirante autour de l'image.
-  ajouterImageSure(doc, org.cachet_data, null, largeur - marge - 50, doc.lastAutoTable.finalY - 24, 46, 22);
+  // Image sous le texte "Signature et cachet de l'organisme :" plutôt qu'à
+  // droite (2026-08-27, demande de Jeremy), alignée à gauche de la cellule.
+  ajouterImageSure(doc, org.cachet_data, null, marge + 2, doc.lastAutoTable.finalY - 21, 42, 19);
   y = doc.lastAutoTable.finalY + 4;
 
   // Marges réduites pour la carte titre (recto + verso, la bande découpée
