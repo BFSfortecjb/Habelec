@@ -239,9 +239,18 @@ async function genererTitrePdf(stagiaireId) {
 
         const symbolesVises = symbolesStagiaire
           .filter(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g));
-        const intitule = symbolesVises.length
+        const libelleTitre = symbolesVises.length
           ? symbolesVises.map(libelleSymbole).join(' / ')
           : libelleGabarit(g); // repli si l'info symbole n'est pas disponible
+
+        // Couleur de la ligne entière (2026-08-27, demande de Jeremy) : vert si
+        // titre entièrement validé (théorie + fondamentales + pratique), rouge
+        // dès qu'un critère est raté, neutre tant que la pratique est en attente.
+        const echoue = (d && !d.ok) || pratOk === false;
+        const valide = d && d.ok && pratOk === true;
+        const intitule = echoue ? cellule(libelleTitre, BFS.rouge)
+          : valide ? cellule(libelleTitre, BFS.vert)
+          : libelleTitre;
 
         return [intitule, theorie, fond, pratique];
       }),
@@ -318,7 +327,12 @@ async function genererTitrePdf(stagiaireId) {
 
   doc.autoTable({
     startY: yCarte + 6, margin: { left: marge, right: marge }, theme: 'grid',
-    styles: { fontSize: 7, cellPadding: 1.4, valign: 'middle' },
+    // cellPadding relevé de 1.4 à 2.2 (2026-08-27, demande de Jeremy) : le
+    // tableau s'arrêtait bien avant le bas de la bande découpée, alors que la
+    // carte verso (page 2) remplit toute la sienne — l'un semblait plus
+    // "grand" que l'autre une fois découpés. Pas de cadre ajouté : on étire
+    // plutôt le contenu existant pour occuper le même espace.
+    styles: { fontSize: 7, cellPadding: 2.2, valign: 'middle' },
     headStyles: { fillColor: BFS.jaune, textColor: BFS.noir, fontStyle: 'bold', halign: 'center' },
     columnStyles: {
       0: { cellWidth: 32 }, 1: { cellWidth: 28, fontStyle: 'bold' },
