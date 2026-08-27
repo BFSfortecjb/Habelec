@@ -334,16 +334,17 @@ async function genererTitrePdf(stagiaireId) {
       [`ORGANISME DE FORMATION : ${org.raison_sociale || ''}`],
       [`RESPONSABLE : ${[org.signataire_nom, org.signataire_fonction].filter(Boolean).join(' — ')}`],
       [{ content: `Date : ${dateFr(new Date().toISOString())}          Signature et cachet de l'organisme :`,
-         styles: { minCellHeight: 13 } }],
+         styles: { minCellHeight: 53 } }],
     ],
   });
   // Signature + cachet du représentant de l'organisme, pré-enregistrés une
   // fois depuis l'onglet Organisme (2026-08-27, demande de Jeremy) : apposés
   // automatiquement sur chaque avis. L'employeur, lui, continue de signer à
   // la main sur le titre (voir plus bas, volet "L'EMPLOYEUR").
-  const yLigneOrg = doc.lastAutoTable.finalY - 11;
-  ajouterImageSure(doc, org.signature_data, null, largeur - marge - 55, yLigneOrg, 26, 9);
-  ajouterImageSure(doc, org.cachet_data, null, largeur - marge - 34, yLigneOrg - 4, 34, 17);
+  // Cachet agrandi 3x (2026-08-27, demande de Jeremy) — la ligne du tableau
+  // grandit avec lui (minCellHeight ci-dessus) pour ne rien chevaucher.
+  ajouterImageSure(doc, org.signature_data, null, largeur - marge - 55, doc.lastAutoTable.finalY - 11, 26, 9);
+  ajouterImageSure(doc, org.cachet_data, null, largeur - marge - 102, doc.lastAutoTable.finalY - 51, 102, 51);
   y = doc.lastAutoTable.finalY + 4;
 
   // Marges réduites pour la carte titre (recto + verso, la bande découpée
