@@ -176,6 +176,7 @@ button.icone:hover { background: var(--gris-fond); border-radius: 6px; }
 }
 .formulaire legend { font-size: 13px; font-weight: 700; color: var(--gris); padding: 0 6px; }
 .grille-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.grille-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 16px; }
 label.case { display: inline-flex; align-items: center; gap: 6px; margin: 3px 14px 3px 0; }
 label.case input { width: auto; margin: 0; accent-color: var(--jaune); }
 .groupe-symboles { margin-bottom: 10px; }
@@ -373,6 +374,7 @@ details h4 { margin-top: 14px; font-size: 13px; color: var(--gris-doux); }
 
 @media (max-width: 700px) {
   .grille-2 { grid-template-columns: 1fr; }
+  .grille-3 { grid-template-columns: 1fr; }
   .entete { gap: 12px; padding: 10px 14px; }
   main { padding: 14px; }
   .info-passation { gap: 18px; }

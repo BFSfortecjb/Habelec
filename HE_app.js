@@ -881,6 +881,7 @@ async function rendreBanque(zone) {
           🖼 Importer des images en masse
           <input type="file" accept="image/*" multiple hidden onchange="importerImagesEnMasse(this)"></label>
         <button onclick="listerAValider()">Questions à relire${nbAValider ? ` (${nbAValider})` : ''}</button>
+        <button onclick="listerDoublons()">Doublons probables</button>
         <button class="principal" onclick="editerQuestion(null)">+ Nouvelle question</button>
       </div>
     </div>
@@ -963,20 +964,61 @@ function codeAffiche(q) {
 async function listerAValider() {
   const { data } = await sb.from('questions').select('*').eq('a_valider', true).order('theme_code');
   if (!data?.length) return toast('Aucune question en attente de relecture');
+  AVALIDER.donnees = data;
+
+  const themesPresents = S.referentiel.themes.filter(t => data.some(q => q.theme_code === t.code));
+
   ouvrirModale(`Questions à relire (${data.length})`, `
     <p class="aide">Question classée automatiquement à l'import, ou remise "à relire" après
        correction d'une clé erronée pendant une session. Ouvre-la pour vérifier son contenu,
        ou valide directement si elle est déjà correcte en l'état.</p>
+    <div class="grille-3">
+      <label>Recherche <input id="filtre-avalider-texte" type="search" placeholder="mot dans l'énoncé…"></label>
+      <label>Thématique
+        <select id="filtre-avalider-theme">
+          <option value="">— toutes —</option>
+          ${themesPresents.map(t => `<option value="${esc(t.code)}">${esc(t.libelle)}</option>`).join('')}
+        </select></label>
+      <label>Fondamentale
+        <select id="filtre-avalider-fond">
+          <option value="">— indifférent —</option>
+          <option value="oui">Oui</option>
+          <option value="non">Non</option>
+        </select></label>
+    </div>
     <table class="tableau"><thead><tr><th>Énoncé</th><th>Thématique</th><th></th></tr></thead>
-      <tbody id="corps-a-valider">${data.map(q => `<tr id="ligne-avalider-${q.id}">
+      <tbody id="corps-a-valider"></tbody></table>
+    <p id="compte-avalider" class="aide"></p>
+    <div class="pied-modale"><button onclick="fermerModale()">Fermer</button></div>`);
+
+  ['filtre-avalider-texte', 'filtre-avalider-theme', 'filtre-avalider-fond']
+    .forEach(id => $('#' + id).addEventListener('input', filtrerAValider));
+  filtrerAValider();
+}
+
+// Filtrage 100% côté écran (2026-08-27, demande de Jeremy) : les questions
+// à relire sont déjà toutes chargées en mémoire, inutile de refaire une
+// requête à chaque frappe.
+const AVALIDER = { donnees: [] };
+function filtrerAValider() {
+  const texte = ($('#filtre-avalider-texte')?.value || '').trim().toLowerCase();
+  const theme = $('#filtre-avalider-theme')?.value || '';
+  const fond = $('#filtre-avalider-fond')?.value || '';
+
+  const visibles = AVALIDER.donnees.filter(q =>
+    (!texte || q.enonce.toLowerCase().includes(texte))
+    && (!theme || q.theme_code === theme)
+    && (!fond || (fond === 'oui' ? q.fondamentale : !q.fondamentale)));
+
+  $('#corps-a-valider').innerHTML = visibles.map(q => `<tr id="ligne-avalider-${q.id}">
         <td>${esc(q.enonce.slice(0, 120))}</td>
         <td>${esc(libelleTheme(q.theme_code))}</td>
         <td>
           <button class="lien" onclick="editerQuestion('${q.id}')">Relire</button>
           <button class="lien" onclick="validerRapide('${q.id}')">Valider</button>
         </td>
-      </tr>`).join('')}</tbody></table>
-    <div class="pied-modale"><button onclick="fermerModale()">Fermer</button></div>`);
+      </tr>`).join('') || '<tr><td colspan="3" class="vide">Aucune question ne correspond à ces filtres.</td></tr>';
+  $('#compte-avalider').textContent = `${visibles.length} / ${AVALIDER.donnees.length} question(s) affichée(s)`;
 }
 
 /* Validation rapide depuis la liste "à relire" (2026-08-27) : pas besoin
@@ -986,9 +1028,55 @@ async function validerRapide(id) {
   try {
     const { error } = await sb.from('questions').update({ a_valider: false, maj_le: new Date().toISOString() }).eq('id', id);
     if (error) throw error;
+    AVALIDER.donnees = AVALIDER.donnees.filter(q => q.id !== id);
     document.getElementById(`ligne-avalider-${id}`)?.remove();
+    if ($('#compte-avalider')) $('#compte-avalider').textContent =
+      `${$$('#corps-a-valider tr[id^="ligne-avalider-"]').length} / ${AVALIDER.donnees.length} question(s) affichée(s)`;
     toast('Question validée');
   } catch (e) { erreurSupabase('Validation de la question', e); }
+}
+
+/* --------- Doublons probables (2026-08-27, demande de Jeremy) ---------
+ * Repère les énoncés très proches (similarité trigramme côté SQL, voir
+ * questions_doublons_probables) pour accélérer la relecture des ~200
+ * questions en attente — beaucoup sont des reformulations quasi
+ * identiques venues de l'import Moodle + de la génération en masse. */
+async function listerDoublons() {
+  let paires;
+  try { paires = await rpc('questions_doublons_probables', { p_seuil: 0.5 }); }
+  catch (e) { return erreurSupabase('Détection des doublons', e); }
+  if (!paires?.length) return toast('Aucun doublon probable détecté (questions actives)');
+
+  ouvrirModale(`Doublons probables (${paires.length})`, `
+    <p class="aide">Deux questions dont l'énoncé se ressemble beaucoup — classées par
+       ressemblance décroissante. Une ressemblance de 100% = énoncés identiques. Vérifie et
+       désactive celle qui fait doublon (celle qui reste active continue de servir aux tirages).</p>
+    <table class="tableau"><thead><tr><th>Ressemblance</th><th>Question A</th><th>Question B</th></tr></thead>
+      <tbody>${paires.map(p => `<tr id="ligne-doublon-${p.id_a}-${p.id_b}">
+        <td><b>${Math.round(p.similarite * 100)}%</b></td>
+        <td>${esc(codeAffiche({ numero: p.numero_a, theme_code: p.theme_a }))} —
+          ${esc(p.enonce_a.slice(0, 90))}
+          <button class="lien" onclick="editerQuestion('${p.id_a}')">Ouvrir</button>
+          <button class="lien" onclick="desactiverDoublon('${p.id_a}', '${p.id_b}')">Désactiver celle-ci</button></td>
+        <td>${esc(codeAffiche({ numero: p.numero_b, theme_code: p.theme_b }))} —
+          ${esc(p.enonce_b.slice(0, 90))}
+          <button class="lien" onclick="editerQuestion('${p.id_b}')">Ouvrir</button>
+          <button class="lien" onclick="desactiverDoublon('${p.id_b}', '${p.id_a}')">Désactiver celle-ci</button></td>
+      </tr>`).join('')}</tbody></table>
+    <div class="pied-modale"><button onclick="fermerModale()">Fermer</button></div>`);
+}
+
+async function desactiverDoublon(idADesactiver, idAutre) {
+  if (!confirmer('Désactiver cette question ? Elle ne sera plus utilisée dans les tirages, '
+    + 'mais reste consultable dans la banque.')) return;
+  try {
+    const { error } = await sb.from('questions')
+      .update({ active: false, maj_le: new Date().toISOString() }).eq('id', idADesactiver);
+    if (error) throw error;
+    document.getElementById(`ligne-doublon-${idADesactiver}-${idAutre}`)?.remove();
+    document.getElementById(`ligne-doublon-${idAutre}-${idADesactiver}`)?.remove();
+    toast('Question désactivée');
+  } catch (e) { erreurSupabase('Désactivation de la question', e); }
 }
 
 /* Bascule à relire / validée depuis la liste par thématique (2026-08-27) :
