@@ -1056,28 +1056,49 @@ async function validerRapide(id) {
  * Repère les énoncés très proches (similarité trigramme côté SQL, voir
  * questions_doublons_probables) pour accélérer la relecture des ~200
  * questions en attente — beaucoup sont des reformulations quasi
- * identiques venues de l'import Moodle + de la génération en masse. */
+ * identiques venues de l'import Moodle + de la génération en masse.
+ *
+ * 2026-08-27 (bis) : certaines paires ne sont PAS des erreurs à corriger
+ * mais des doublons volontaires (même question déclinée dans plusieurs
+ * thématiques pour compter dans leurs quotas respectifs) — bouton "Lier"
+ * pour les rattacher entre elles (habelec.lier_questions) : la fonction
+ * SQL les exclut ensuite définitivement de cette liste, et toute future
+ * modification de l'une se répercute automatiquement sur l'autre.
+ * Affiche aussi l'énoncé complet + les réponses de chaque exemplaire,
+ * pour contrôler sans avoir à ouvrir chaque question une par une. */
 async function listerDoublons() {
   let paires;
   try { paires = await rpc('questions_doublons_probables', { p_seuil: 0.5 }); }
   catch (e) { return erreurSupabase('Détection des doublons', e); }
-  if (!paires?.length) return toast('Aucun doublon probable détecté (questions actives)');
+  if (!paires?.length) return toast('Aucun doublon probable détecté (hors questions déjà liées)');
+
+  const carte = q => `
+    <div class="enonce">${esc(q.enonce)}
+      ${q.fondamentale ? '<span class="puce fond">fondamentale</span>' : ''}</div>
+    ${q.image_url ? `<img class="vignette-question" src="${esc(q.image_url)}" alt="">` : ''}
+    <ul>${(q.reponses || []).map(r => `<li class="${r.correcte ? 'bonne' : ''}">${r.correcte ? '✔' : '·'} ${esc(r.libelle)}</li>`).join('')}</ul>`;
 
   ouvrirModale(`Doublons probables (${paires.length})`, `
     <p class="aide">Deux questions dont l'énoncé se ressemble beaucoup — classées par
-       ressemblance décroissante. Une ressemblance de 100% = énoncés identiques. Vérifie et
-       désactive celle qui fait doublon (celle qui reste active continue de servir aux tirages).</p>
+       ressemblance décroissante. Une ressemblance de 100% = énoncés identiques.
+       Si c'est une erreur (même question par mégarde), désactive celle qui fait doublon.
+       Si c'est volontaire (même question déclinée dans plusieurs thématiques), clique
+       "Lier" : elles n'apparaîtront plus ici, et modifier l'une mettra l'autre à jour
+       automatiquement (sauf la thématique, propre à chacune).</p>
     <table class="tableau"><thead><tr><th>Ressemblance</th><th>Question A</th><th>Question B</th></tr></thead>
       <tbody>${paires.map(p => `<tr id="ligne-doublon-${p.id_a}-${p.id_b}">
         <td><b>${Math.round(p.similarite * 100)}%</b></td>
-        <td>${esc(codeAffiche({ numero: p.numero_a, theme_code: p.theme_a }))} —
-          ${esc(p.enonce_a.slice(0, 90))}
+        <td>${esc(codeAffiche({ numero: p.numero_a, theme_code: p.theme_a }))}
+          ${carte({ enonce: p.enonce_a, fondamentale: p.fondamentale_a, image_url: p.image_a, reponses: p.reponses_a })}
           <button class="lien" onclick="editerQuestion('${p.id_a}')">Ouvrir</button>
           <button class="lien" onclick="desactiverDoublon('${p.id_a}', '${p.id_b}')">Désactiver celle-ci</button></td>
-        <td>${esc(codeAffiche({ numero: p.numero_b, theme_code: p.theme_b }))} —
-          ${esc(p.enonce_b.slice(0, 90))}
+        <td>${esc(codeAffiche({ numero: p.numero_b, theme_code: p.theme_b }))}
+          ${carte({ enonce: p.enonce_b, fondamentale: p.fondamentale_b, image_url: p.image_b, reponses: p.reponses_b })}
           <button class="lien" onclick="editerQuestion('${p.id_b}')">Ouvrir</button>
           <button class="lien" onclick="desactiverDoublon('${p.id_b}', '${p.id_a}')">Désactiver celle-ci</button></td>
+      </tr><tr id="ligne-doublon-actions-${p.id_a}-${p.id_b}"><td></td>
+        <td colspan="2"><button class="principal" onclick="lierPaireDoublon('${p.id_a}', '${p.id_b}')">
+          Lier (pas un doublon — même question dans deux thématiques)</button></td>
       </tr>`).join('')}</tbody></table>
     <div class="pied-modale"><button onclick="fermerModale()">Fermer</button></div>`);
 }
@@ -1091,8 +1112,23 @@ async function desactiverDoublon(idADesactiver, idAutre) {
     if (error) throw error;
     document.getElementById(`ligne-doublon-${idADesactiver}-${idAutre}`)?.remove();
     document.getElementById(`ligne-doublon-${idAutre}-${idADesactiver}`)?.remove();
+    document.getElementById(`ligne-doublon-actions-${idADesactiver}-${idAutre}`)?.remove();
+    document.getElementById(`ligne-doublon-actions-${idAutre}-${idADesactiver}`)?.remove();
     toast('Question désactivée');
   } catch (e) { erreurSupabase('Désactivation de la question', e); }
+}
+
+async function lierPaireDoublon(idA, idB) {
+  if (!confirmer('Lier ces deux questions ? Toute modification future de l\'une (énoncé, '
+    + 'réponses, explication, image, fondamentale) sera automatiquement recopiée sur l\'autre. '
+    + 'Seule la thématique reste propre à chacune. Elles n\'apparaîtront plus dans les doublons.')) return;
+  try {
+    const { error } = await sb.rpc('lier_questions', { p_id_a: idA, p_id_b: idB });
+    if (error) throw error;
+    document.getElementById(`ligne-doublon-${idA}-${idB}`)?.remove();
+    document.getElementById(`ligne-doublon-actions-${idA}-${idB}`)?.remove();
+    toast('Questions liées');
+  } catch (e) { erreurSupabase('Liaison des questions', e); }
 }
 
 /* Bascule à relire / validée depuis la liste par thématique (2026-08-27) :
