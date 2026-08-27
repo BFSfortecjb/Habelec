@@ -1097,8 +1097,14 @@ async function listerDoublons() {
           <button class="lien" onclick="editerQuestion('${p.id_b}')">Ouvrir</button>
           <button class="lien" onclick="desactiverDoublon('${p.id_b}', '${p.id_a}')">Désactiver celle-ci</button></td>
       </tr><tr id="ligne-doublon-actions-${p.id_a}-${p.id_b}"><td></td>
-        <td colspan="2"><button class="principal" onclick="lierPaireDoublon('${p.id_a}', '${p.id_b}')">
-          Lier (pas un doublon — même question dans deux thématiques)</button></td>
+        <td colspan="2">
+          ${p.theme_a === p.theme_b
+            ? '<span class="aide">Même thématique des deux côtés : probablement un vrai doublon à désactiver ci-dessus, pas à lier.</span>'
+            : `<button class="principal" onclick="lierPaireDoublon('${p.id_a}', '${p.id_b}')">
+                 Lier (pas un doublon — même question dans deux thématiques)</button>`}
+          <button class="lien" onclick="ignorerPaireDoublon('${p.id_a}', '${p.id_b}')">
+            Ce n'est pas un doublon (contenu différent)</button>
+        </td>
       </tr>`).join('')}</tbody></table>
     <div class="pied-modale"><button onclick="fermerModale()">Fermer</button></div>`);
 }
@@ -1129,6 +1135,21 @@ async function lierPaireDoublon(idA, idB) {
     document.getElementById(`ligne-doublon-actions-${idA}-${idB}`)?.remove();
     toast('Questions liées');
   } catch (e) { erreurSupabase('Liaison des questions', e); }
+}
+
+/* 2026-08-27 : certaines paires se ressemblent en surface (même début
+ * d'énoncé générique, ex: "Le B1V doit :") sans être ni un doublon à
+ * corriger, ni la même question à lier entre deux thématiques — juste
+ * une coïncidence de formulation. Ce bouton écarte la paire définitivement
+ * de cette liste, sans toucher aux deux questions. */
+async function ignorerPaireDoublon(idA, idB) {
+  try {
+    const { error } = await sb.rpc('ignorer_doublon', { p_id_a: idA, p_id_b: idB });
+    if (error) throw error;
+    document.getElementById(`ligne-doublon-${idA}-${idB}`)?.remove();
+    document.getElementById(`ligne-doublon-actions-${idA}-${idB}`)?.remove();
+    toast('Paire écartée des doublons probables');
+  } catch (e) { erreurSupabase('Mise à l\'écart de la paire', e); }
 }
 
 /* Bascule à relire / validée depuis la liste par thématique (2026-08-27) :
