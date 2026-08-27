@@ -344,7 +344,10 @@ async function genererTitrePdf(stagiaireId) {
   // Cachet agrandi 3x (2026-08-27, demande de Jeremy) — la ligne du tableau
   // grandit avec lui (minCellHeight ci-dessus) pour ne rien chevaucher.
   ajouterImageSure(doc, org.signature_data, null, largeur - marge - 55, doc.lastAutoTable.finalY - 11, 26, 9);
-  ajouterImageSure(doc, org.cachet_data, null, largeur - marge - 102, doc.lastAutoTable.finalY - 51, 102, 51);
+  // Marge respirante autour du cachet (2026-08-27, retour de Jeremy : trop
+  // collé aux bords / au texte "Signature et cachet" au-dessus) : la boîte
+  // laisse ~7mm sous le libellé, ~4mm à droite et ~3mm en bas de la ligne.
+  ajouterImageSure(doc, org.cachet_data, null, largeur - marge - 94, doc.lastAutoTable.finalY - 46, 90, 43);
   y = doc.lastAutoTable.finalY + 4;
 
   // Marges réduites pour la carte titre (recto + verso, la bande découpée
