@@ -1644,6 +1644,25 @@ async function rendreVerification(zone) {
   if (error) return erreurSupabase('Lecture des titres délivrés', error);
 
   S._titresVerification = data || [];
+  afficherVerification(zone, '');
+
+  zone.addEventListener('input', ev => {
+    if (ev.target.id !== 'recherche-verification') return;
+    afficherVerification(zone, ev.target.value);
+    // Réaffiché en entier (innerHTML) à chaque frappe => on remet le focus
+    // et le curseur en fin de texte, sinon le champ perd le focus.
+    const champ = document.getElementById('recherche-verification');
+    champ.focus();
+    champ.setSelectionRange(champ.value.length, champ.value.length);
+  });
+}
+
+function afficherVerification(zone, filtre) {
+  const f = (filtre || '').trim().toLowerCase();
+  const tout = S._titresVerification || [];
+  const data = !f ? tout : tout.filter(t => [
+    t.numero, t.nom, t.prenom, t.session, t.numero_session_galaxy,
+  ].some(champ => (champ || '').toLowerCase().includes(f)));
 
   zone.innerHTML = `
     <div class="barre-actions"><h2>Vérification d'authenticité</h2>
@@ -1652,9 +1671,11 @@ async function rendreVerification(zone) {
     <p class="aide">Chaque titre délivré porte un numéro unique (ex. HE-2026-4521-001), imprimé sur
       l'avis et sur le titre remis au stagiaire. Cet export alimente la base externe de vérification
       d'authenticité consultée par les employeurs — à réexporter et retransmettre après chaque session.</p>
+    <input type="search" id="recherche-verification" placeholder="Rechercher (nom, n° de vérification, session...)"
+      value="${esc(filtre || '')}" style="margin-bottom:10px;max-width:340px">
     <table class="tableau">
       <thead><tr><th>N° de vérification</th><th>Nom</th><th>Prénom</th><th>Session</th>
-        <th>N° session Galaxy</th><th>Date de délivrance</th><th>À recycler avant</th></tr></thead>
+        <th>N° session Galaxy</th><th>Date de délivrance</th><th>À recycler avant</th><th></th></tr></thead>
       <tbody>${data.map(t => `
         <tr>
           <td>${esc(t.numero)}</td>
@@ -1664,8 +1685,22 @@ async function rendreVerification(zone) {
           <td>${esc(t.numero_session_galaxy || '—')}</td>
           <td>${dateFr(t.delivre_le)}</td>
           <td>${dateFr(t.recycler_avant)}</td>
-        </tr>`).join('')}</tbody>
+          <td><button class="icone" title="Purger ce titre (test, doublon...)"
+                onclick="purgerTitreVerification('${t.id}')">🗑</button></td>
+        </tr>`).join('') || '<tr><td colspan="8" class="vide">Aucun titre ne correspond.</td></tr>'}
+      </tbody>
     </table>`;
+}
+
+async function purgerTitreVerification(id) {
+  const t = (S._titresVerification || []).find(x => x.id === id);
+  if (!confirm(`Purger définitivement le titre ${t?.numero || ''} (${t?.nom || ''} ${t?.prenom || ''}) ?\n\n`
+    + 'Cette suppression est définitive — à réserver aux titres de test.')) return;
+  const { error } = await sb.from('titres_habilitation').delete().eq('id', id);
+  if (error) return erreurSupabase('Purge du titre', error);
+  S._titresVerification = (S._titresVerification || []).filter(x => x.id !== id);
+  toast('Titre purgé');
+  afficherVerification($('#contenu'), document.getElementById('recherche-verification')?.value || '');
 }
 
 function exporterTitresVerification() {
