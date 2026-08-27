@@ -60,6 +60,7 @@ const ONGLETS = {
   verification:  'Vérification',
   organisme:     'Organisme',
   comptes:       'Comptes',
+  moncompte:     'Mon compte',
 };
 
 // Onglets réservés à l'administrateur (réglages qui touchent tous les organismes
@@ -80,6 +81,7 @@ const RENDU = {
   verification: rendreVerification,
   organisme:    rendreOrganisme,
   comptes:      rendreComptes,
+  moncompte:    rendreMonCompte,
   pratique:     rendrePratique,     // défini dans HE_pratique.js
 };
 
@@ -1567,13 +1569,18 @@ async function rendreOrganisme(zone) {
         <label>Validité des titres (années)
           <input name="validite_annees" type="number" min="1" max="5" value="${o.validite_annees || 3}"></label>
       </div>
-      <fieldset><legend>Signature de l'employeur (apposée sur les titres)</legend>
+      <fieldset><legend>Signature du représentant de l'organisme (apposée automatiquement sur
+        l'avis d'habilitation — pas sur le titre, que l'employeur signe à la main)</legend>
         ${widgetSignature('signature-organisme', o.signature_data)}
+      </fieldset>
+      <fieldset><legend>Cachet de l'organisme (apposé automatiquement sur l'avis d'habilitation)</legend>
+        ${widgetImage('cachet-organisme', o.cachet_data)}
       </fieldset>
       <button class="principal" type="submit">Enregistrer</button>
     </form>`;
 
   activerSignature('signature-organisme');
+  activerImage('cachet-organisme');
   $('#form-organisme').addEventListener('submit', async ev => {
     ev.preventDefault();
     const f = ev.target;
@@ -1584,9 +1591,42 @@ async function rendreOrganisme(zone) {
       signataire_fonction: f.signataire_fonction.value.trim(),
       validite_annees: parseInt(f.validite_annees.value, 10) || 3,
       signature_data: lireSignature('signature-organisme'),
+      cachet_data: lireImage('cachet-organisme'),
     }).eq('id', o.id);
     if (error) return erreurSupabase('Enregistrement', error);
     toast('Organisme enregistré');
+    await chargerProfil();
+  });
+}
+
+/* ============ 8 ter. Onglet Mon compte (tout formateur) ===============
+ * Demande de Jeremy (2026-08-27) : chaque formateur enregistre sa propre
+ * signature une fois, apposée automatiquement sur chaque avis d'habilitation
+ * qu'il émet ensuite (S.profil.signature_data, lu dans genererTitrePdf) —
+ * plus besoin de signer à la main à chaque avis. Accessible à tout
+ * formateur authentifié (pas réservé à l'admin, chacun gère la sienne) ;
+ * la policy form_self existante autorise déjà cette écriture. */
+async function rendreMonCompte(zone) {
+  const p = S.profil || {};
+  zone.innerHTML = `
+    <div class="barre-actions"><h2>Mon compte</h2></div>
+    <form id="form-mon-compte" class="formulaire carte">
+      <p>${esc(p.nom || '')} ${esc(p.prenom || '')} — ${esc(S.utilisateur?.email || '')}</p>
+      <fieldset><legend>Ma signature (apposée automatiquement sur chaque avis d'habilitation
+        que je délivre)</legend>
+        ${widgetSignature('signature-formateur', p.signature_data)}
+      </fieldset>
+      <button class="principal" type="submit">Enregistrer</button>
+    </form>`;
+
+  activerSignature('signature-formateur');
+  $('#form-mon-compte').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const { error } = await sb.from('formateurs').update({
+      signature_data: lireSignature('signature-formateur'),
+    }).eq('id', p.id);
+    if (error) return erreurSupabase('Enregistrement', error);
+    toast('Signature enregistrée');
     await chargerProfil();
   });
 }
@@ -1840,6 +1880,46 @@ function lireSignature(id) {
   const vide = document.createElement('canvas');
   vide.width = c.width; vide.height = c.height;
   return c.toDataURL() === vide.toDataURL() ? null : c.toDataURL('image/png');
+}
+
+/* -------------- widget d'upload d'image (cachet organisme) ---------- */
+// Distinct du widget de signature ci-dessus : un cachet est une image
+// existante (photo/scan du tampon), pas un tracé à la souris — simple
+// input file, converti en dataURL et prévisualisé (2026-08-27).
+function widgetImage(id, valeur) {
+  return `<div class="image-upload" id="${id}">
+    <img class="apercu" src="${esc(valeur || '')}" style="${valeur ? '' : 'display:none'}"
+      alt="Aperçu">
+    <input type="file" accept="image/*">
+    <button type="button" class="lien" onclick="effacerImage('${id}')">Effacer</button>
+  </div>`;
+}
+
+function activerImage(id) {
+  const zone = document.getElementById(id);
+  if (!zone) return;
+  const input = zone.querySelector('input[type=file]');
+  const img = zone.querySelector('img.apercu');
+  input.addEventListener('change', () => {
+    const fichier = input.files[0];
+    if (!fichier) return;
+    const lecteur = new FileReader();
+    lecteur.onload = () => { img.src = lecteur.result; img.style.display = ''; };
+    lecteur.readAsDataURL(fichier);
+  });
+}
+
+function effacerImage(id) {
+  const zone = document.getElementById(id);
+  const img = zone.querySelector('img.apercu');
+  img.src = ''; img.style.display = 'none';
+  zone.querySelector('input[type=file]').value = '';
+}
+
+function lireImage(id) {
+  const img = document.querySelector('#' + id + ' img.apercu');
+  if (!img || !img.src || img.style.display === 'none') return null;
+  return img.src.startsWith('data:') ? img.src : null;
 }
 
 /* ------------------------- modale générique ------------------------ */
