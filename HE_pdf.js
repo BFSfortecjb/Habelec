@@ -18,9 +18,13 @@ const { jsPDF } = window.jspdf;
 // modification notable de ce fichier ; aucun effet fonctionnel.
 const PDF_VERSION = 'v14-2026-08-06';
 
-function piedDeVersion(doc, largeur, hauteurPage, marge) {
+// 2026-08-27 (demande de Jeremy) : affiché au-dessus du trait de découpe,
+// donc dans la partie DOSSIER (conservée par l'employeur), jamais sur la
+// carte TITRE remise au titulaire — ce repère technique n'a rien à faire
+// entre les mains du salarié.
+function piedDeVersion(doc, largeur, marge, yCarte) {
   doc.setFont('helvetica', 'normal').setFontSize(6).setTextColor(180, 180, 180);
-  doc.text(PDF_VERSION, largeur - marge, hauteurPage - 4, { align: 'right' });
+  doc.text(PDF_VERSION, largeur - marge, yCarte - 1.5, { align: 'right' });
 }
 
 // Charte graphique Univers BFS (commune à toutes les applis) : jaune #f3ab12,
@@ -31,6 +35,7 @@ function piedDeVersion(doc, largeur, hauteurPage, marge) {
 const BFS = {
   jaune: [243, 171, 18],
   rouge: [178, 24, 26],
+  vert: [27, 124, 60],
   gris: [70, 70, 69],
   noir: [8, 8, 8],
   grisClair: [244, 244, 243],
@@ -78,7 +83,16 @@ async function genererTitrePdf(stagiaireId) {
     return erreurSupabase('Génération du titre', e);
   }
 
-  const { data: st } = await sb.from('stagiaires').select('*').eq('id', stagiaireId).single();
+  const { data: stRaw } = await sb.from('stagiaires')
+    .select('*, stagiaire_symboles(symbole_code)').eq('id', stagiaireId).single();
+  const st = stRaw;
+  // Symboles réellement visés par CE stagiaire (2026-08-27, demande de Jeremy) :
+  // sert à afficher, dans le détail par titre visé, uniquement le(s) titre(s)
+  // effectivement visé(s) — pas l'intitulé complet du gabarit, qui peut nommer
+  // deux titres partageant la même épreuve (ex: "HE Mesurage / HE Vérification"
+  // pour D.3.1.11) alors qu'un seul des deux a été visé. Éviter l'incohérence
+  // avec le tableau Annexe C du titre lui-même, qui ne liste que le symbole réel.
+  const symbolesStagiaire = (st.stagiaire_symboles || []).map(x => x.symbole_code);
   const [{ data: session }, { data: ep }] = await Promise.all([
     sb.from('sessions_formation').select('*').eq('id', st.session_id).single(),
     sb.from('epreuves_theoriques').select('*').eq('stagiaire_id', stagiaireId).maybeSingle(),
@@ -203,20 +217,33 @@ async function genererTitrePdf(stagiaireId) {
         const d = detailParGabarit[g];
         const pratOk = pratiqueParGabarit[g];
         const refFond = fondNormeParGabarit[g] || 0;
-        // Nombre normatif (Annexe D.3) propre au titre, pas le total mutualisé
-        // avec d'éventuels autres titres visés dans le même examen — voir le
-        // commentaire sur fondNormeParGabarit ci-dessus. La qualification
-        // (toutes justes / insuffisant) vient bien du résultat réel du
-        // stagiaire (d.fond_ok), la validation n'est pas modifiée.
+        // Score chiffré (ex: 3/4) plutôt qu'un texte "toutes justes / insuffisant"
+        // (demande de Jeremy, 2026-08-27) — le nombre requis vient bien de la
+        // norme (Annexe D.3, voir fondNormeParGabarit ci-dessus), le score
+        // réalisé (d.fond_justes) du résultat réel du stagiaire.
+        const cellule = (texte, couleur) => couleur
+          ? { content: texte, styles: { textColor: couleur, fontStyle: 'bold' } }
+          : texte;
+
         const fond = refFond === 0 ? 'aucune exigée'
           : !d ? `${refFond} requise(s)`
-          : `${refFond} requise(s) — ${d.fond_ok ? 'toutes justes' : 'insuffisant'}`;
-        return [
-          libelleGabarit(g),
-          d ? `${d.justes}/${d.total} (${d.taux} %)` : '—',
-          fond,
-          pratOk === true ? 'validée' : pratOk === false ? 'non validée' : 'en attente',
-        ];
+          : cellule(`${d.fond_justes}/${refFond}`, d.fond_ok ? BFS.vert : BFS.rouge);
+
+        const theorie = d
+          ? cellule(`${d.justes}/${d.total} (${d.taux} %)`, d.ok ? BFS.vert : BFS.rouge)
+          : '—';
+
+        const pratique = pratOk === true ? cellule('validée', BFS.vert)
+          : pratOk === false ? cellule('non validée', BFS.rouge)
+          : 'en attente';
+
+        const symbolesVises = symbolesStagiaire
+          .filter(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g));
+        const intitule = symbolesVises.length
+          ? symbolesVises.map(libelleSymbole).join(' / ')
+          : libelleGabarit(g); // repli si l'info symbole n'est pas disponible
+
+        return [intitule, theorie, fond, pratique];
       }),
     });
     y = doc.lastAutoTable.finalY + 4;
@@ -253,8 +280,6 @@ async function genererTitrePdf(stagiaireId) {
   });
   y = doc.lastAutoTable.finalY + 4;
 
-  piedDeVersion(doc, largeur, hauteurPage, marge);
-
   // Repère de découpe sur la page 1 (recto) : la bande sous ce trait n'est
   // PAS un simple espace vide, c'est le recto du titre à remettre au
   // titulaire (le tableau Annexe C ci-dessous). Le garde-fou évite juste que
@@ -266,6 +291,7 @@ async function genererTitrePdf(stagiaireId) {
     doc.setLineDashPattern([], 0);
     doc.setFontSize(7).setTextColor(...BFS.gris).setFont('helvetica', 'italic');
     doc.text('découper ici (même hauteur qu\'au verso)', largeur / 2, yCarte - 1.5, { align: 'center' });
+    piedDeVersion(doc, largeur, marge, yCarte);
   }
 
   /* ================= TITRE — RECTO (tableau Annexe C, bas de page 1) =====
@@ -329,8 +355,6 @@ async function genererTitrePdf(stagiaireId) {
   doc.setFont('helvetica', 'bold').setFontSize(6).setTextColor(...BFS.noir);
   doc.text('N° de vérification : ' + (titre.numero || '—'), largeur - marge, yTableau + 3.5, { align: 'right' });
 
-  piedDeVersion(doc, largeur, hauteurPage, marge);
-
   /* ================= TITRE — VERSO (carte 3 volets, page 2) ===========
    * Bande destinée à être découpée puis pliée en 3 (comme un dépliant),
    * demande de Jeremy 2026-08-06. Ordre gauche → droite :
@@ -348,6 +372,7 @@ async function genererTitrePdf(stagiaireId) {
   doc.setLineDashPattern([], 0);
   doc.setFontSize(7).setTextColor(...BFS.gris).setFont('helvetica', 'italic');
   doc.text('découper ici — verso du titre (à remettre au titulaire)', largeur / 2, yCarte - 1.5, { align: 'center' });
+  piedDeVersion(doc, largeur, marge, yCarte);
 
   const SITES = {
     'Briec': { marque: 'Bretagne Formation Sécurité', tel: '02 98 82 29 67' },
@@ -429,8 +454,6 @@ async function genererTitrePdf(stagiaireId) {
   doc.text(site.marque, xc3, yEncadre + 24, { align: 'center', maxWidth: largeurVolet - 6 });
   doc.setFont('helvetica', 'normal').setFontSize(7).setTextColor(...BFS.gris);
   doc.text(site.tel, xc3, yEncadre + 29, { align: 'center' });
-
-  piedDeVersion(doc, largeur, hauteurPage, marge);
 
   doc.save(`titre_habilitation_${st.nom}_${st.prenom}.pdf`.replace(/\s+/g, '_'));
   toast('Titre et avis d\'habilitation générés');
