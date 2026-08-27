@@ -855,7 +855,7 @@ async function importerStagiairesExcel(input) {
 /* ============ 6. Onglet Banque de questions ======================== */
 async function rendreBanque(zone) {
   zone.innerHTML = '<p class="chargement">Analyse de la banque…</p>';
-  const [{ data: couverture }, { data: compte }, { data: aValider }] = await Promise.all([
+  const [{ data: couverture }, { data: compte }, { count: nbAValider }] = await Promise.all([
     sb.from('v_couverture_banque').select('*').order('gabarit_code').order('theme_code'),
     sb.from('questions').select('theme_code, fondamentale, active'),
     sb.from('questions').select('id', { count: 'exact', head: true }).eq('a_valider', true),
@@ -880,7 +880,7 @@ async function rendreBanque(zone) {
         <label class="bouton-fichier" title="Déposer plusieurs images à la fois, nommées d'après le numéro de la question (ex: 42.jpg)">
           🖼 Importer des images en masse
           <input type="file" accept="image/*" multiple hidden onchange="importerImagesEnMasse(this)"></label>
-        <button onclick="listerAValider()">Questions à relire</button>
+        <button onclick="listerAValider()">Questions à relire${nbAValider ? ` (${nbAValider})` : ''}</button>
         <button class="principal" onclick="editerQuestion(null)">+ Nouvelle question</button>
       </div>
     </div>
@@ -919,8 +919,10 @@ async function listerQuestions(themeCode) {
           <span class="puce" title="Numéro et famille de la question">${esc(codeAffiche(q))}</span>
           ${esc(q.enonce)}
           ${q.fondamentale ? '<span class="puce fond">fondamentale</span>' : ''}
-          ${q.a_valider ? '<span class="puce alerte">à relire</span>' : ''}
+          ${q.a_valider ? '<span class="puce alerte">à relire</span>' : '<span class="puce succes">validée</span>'}
           ${!q.active ? '<span class="puce">désactivée</span>' : ''}
+          <button class="lien" title="Basculer à relire / validée"
+            onclick="toggleAValider('${q.id}', ${!q.a_valider}, '${themeCode}')">${q.a_valider ? 'Marquer validée' : 'Marquer à relire'}</button>
           <button class="icone" title="Modifier" onclick="editerQuestion('${q.id}')">✎</button>
         </div>
         ${q.image_url ? `<img class="vignette-question" src="${esc(q.image_url)}" alt="Image de la question ${esc(codeAffiche(q))}">` : ''}
@@ -961,17 +963,44 @@ function codeAffiche(q) {
 async function listerAValider() {
   const { data } = await sb.from('questions').select('*').eq('a_valider', true).order('theme_code');
   if (!data?.length) return toast('Aucune question en attente de relecture');
-  ouvrirModale('Questions classées automatiquement', `
-    <p class="aide">Ces questions viennent de l'import Moodle. Leur thématique a été
-       devinée à partir du texte : vérifie-la, marque-la « fondamentale » si besoin,
-       puis valide.</p>
+  ouvrirModale(`Questions à relire (${data.length})`, `
+    <p class="aide">Question classée automatiquement à l'import, ou remise "à relire" après
+       correction d'une clé erronée pendant une session. Ouvre-la pour vérifier son contenu,
+       ou valide directement si elle est déjà correcte en l'état.</p>
     <table class="tableau"><thead><tr><th>Énoncé</th><th>Thématique</th><th></th></tr></thead>
-      <tbody>${data.map(q => `<tr>
+      <tbody id="corps-a-valider">${data.map(q => `<tr id="ligne-avalider-${q.id}">
         <td>${esc(q.enonce.slice(0, 120))}</td>
         <td>${esc(libelleTheme(q.theme_code))}</td>
-        <td><button class="lien" onclick="editerQuestion('${q.id}')">Relire</button></td>
+        <td>
+          <button class="lien" onclick="editerQuestion('${q.id}')">Relire</button>
+          <button class="lien" onclick="validerRapide('${q.id}')">Valider</button>
+        </td>
       </tr>`).join('')}</tbody></table>
     <div class="pied-modale"><button onclick="fermerModale()">Fermer</button></div>`);
+}
+
+/* Validation rapide depuis la liste "à relire" (2026-08-27) : pas besoin
+ * d'ouvrir la fiche complète quand l'énoncé est déjà correct en l'état —
+ * pensé pour traiter le retard de relecture par petits lots. */
+async function validerRapide(id) {
+  try {
+    const { error } = await sb.from('questions').update({ a_valider: false, maj_le: new Date().toISOString() }).eq('id', id);
+    if (error) throw error;
+    document.getElementById(`ligne-avalider-${id}`)?.remove();
+    toast('Question validée');
+  } catch (e) { erreurSupabase('Validation de la question', e); }
+}
+
+/* Bascule à relire / validée depuis la liste par thématique (2026-08-27) :
+ * marquer une question à retraiter plus tard, indépendamment de toute
+ * modification de son contenu — demande de Jeremy. */
+async function toggleAValider(id, aValider, themeCode) {
+  try {
+    const { error } = await sb.from('questions').update({ a_valider: aValider, maj_le: new Date().toISOString() }).eq('id', id);
+    if (error) throw error;
+    toast(aValider ? 'Question marquée à relire' : 'Question marquée validée');
+    await listerQuestions(themeCode);
+  } catch (e) { erreurSupabase('Mise à jour de la question', e); }
 }
 
 async function editerQuestion(id) {
@@ -999,6 +1028,8 @@ async function editerQuestion(id) {
         Question fondamentale (son échec invalide le titre)</label>
       <label class="case"><input type="checkbox" name="active" ${q.active !== false ? 'checked' : ''}>
         Question active (utilisable dans les tirages)</label>
+      <label class="case"><input type="checkbox" name="a_valider" ${q.a_valider ? 'checked' : ''}>
+        Encore à relire (laisse coché si tu veux la retraiter plus tard malgré cet enregistrement)</label>
       <fieldset><legend>Propositions — coche celles qui sont justes</legend>
         <div id="reponses">${q.reponses.map((r, i) => ligneReponse(r, i)).join('')}</div>
         <button type="button" class="lien" onclick="ajouterReponse()">+ Ajouter une proposition</button>
@@ -1028,7 +1059,7 @@ async function editerQuestion(id) {
       fondamentale: f.fondamentale.checked,
       active: f.active.checked,
       choix_multiple: reponses.filter(r => r.correcte).length > 1,
-      a_valider: false,
+      a_valider: f.a_valider.checked,
       origine: id ? undefined : 'saisie',
       maj_le: new Date().toISOString(),
     };

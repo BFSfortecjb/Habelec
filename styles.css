@@ -146,6 +146,7 @@ button.icone:hover { background: var(--gris-fond); border-radius: 6px; }
 /* Question fondamentale : son échec invalide le titre — signal fort */
 .puce.fond { background: var(--rouge-fond); color: var(--rouge); font-weight: 700; }
 .puce.alerte { background: var(--jaune-fond); color: var(--jaune-fonce); font-weight: 600; }
+.puce.succes { background: var(--vert-fond); color: var(--vert); font-weight: 600; }
 
 /* Statut de validation d'un titre visé, dans la liste des stagiaires :
    gris (par défaut) = non évalué, vert clair = théorie validée (pratique en
