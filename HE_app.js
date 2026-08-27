@@ -962,7 +962,9 @@ function codeAffiche(q) {
 }
 
 async function listerAValider() {
-  const { data } = await sb.from('questions').select('*').eq('a_valider', true).order('theme_code');
+  const { data } = await sb.from('questions')
+    .select('*, question_reponses(id, libelle, correcte, position)')
+    .eq('a_valider', true).order('theme_code');
   if (!data?.length) return toast('Aucune question en attente de relecture');
   AVALIDER.donnees = data;
 
@@ -970,8 +972,9 @@ async function listerAValider() {
 
   ouvrirModale(`Questions à relire (${data.length})`, `
     <p class="aide">Question classée automatiquement à l'import, ou remise "à relire" après
-       correction d'une clé erronée pendant une session. Ouvre-la pour vérifier son contenu,
-       ou valide directement si elle est déjà correcte en l'état.</p>
+       correction d'une clé erronée pendant une session. Vérifie l'énoncé, les bonnes réponses
+       et la thématique (menu déroulant), puis valide directement — pas besoin d'ouvrir la
+       fiche complète sauf pour changer le texte ou les propositions elles-mêmes.</p>
     <div class="grille-3">
       <label>Recherche <input id="filtre-avalider-texte" type="search" placeholder="mot dans l'énoncé…"></label>
       <label>Thématique
@@ -986,8 +989,7 @@ async function listerAValider() {
           <option value="non">Non</option>
         </select></label>
     </div>
-    <table class="tableau"><thead><tr><th>Énoncé</th><th>Thématique</th><th></th></tr></thead>
-      <tbody id="corps-a-valider"></tbody></table>
+    <ol class="copie" id="corps-a-valider"></ol>
     <p id="compte-avalider" class="aide"></p>
     <div class="pied-modale"><button onclick="fermerModale()">Fermer</button></div>`);
 
@@ -1010,29 +1012,43 @@ function filtrerAValider() {
     && (!theme || q.theme_code === theme)
     && (!fond || (fond === 'oui' ? q.fondamentale : !q.fondamentale)));
 
-  $('#corps-a-valider').innerHTML = visibles.map(q => `<tr id="ligne-avalider-${q.id}">
-        <td>${esc(q.enonce.slice(0, 120))}</td>
-        <td>${esc(libelleTheme(q.theme_code))}</td>
-        <td>
-          <button class="lien" onclick="editerQuestion('${q.id}')">Relire</button>
-          <button class="lien" onclick="validerRapide('${q.id}')">Valider</button>
-        </td>
-      </tr>`).join('') || '<tr><td colspan="3" class="vide">Aucune question ne correspond à ces filtres.</td></tr>';
+  // Énoncé complet + propositions (2026-08-27, 2e demande de Jeremy : il faut
+  // voir toute la question pour la valider, pas juste un extrait tronqué) +
+  // menu déroulant pour reclasser la thématique directement depuis la liste.
+  $('#corps-a-valider').innerHTML = visibles.map(q => `<li id="ligne-avalider-${q.id}">
+        <div class="enonce">${esc(q.enonce)}
+          ${q.fondamentale ? '<span class="puce fond">fondamentale</span>' : ''}</div>
+        ${q.image_url ? `<img class="vignette-question" src="${esc(q.image_url)}" alt="">` : ''}
+        <ul>${(q.question_reponses || []).sort((a, b) => a.position - b.position)
+          .map(r => `<li class="${r.correcte ? 'bonne' : ''}">${r.correcte ? '✔' : '·'} ${esc(r.libelle)}</li>`).join('')}</ul>
+        <div class="ligne-actions-avalider">
+          <label>Thématique
+            <select id="theme-avalider-${q.id}">
+              ${S.referentiel.themes.map(t => `<option value="${esc(t.code)}" ${t.code === q.theme_code ? 'selected' : ''}>${esc(t.libelle)}</option>`).join('')}
+            </select></label>
+          <button class="lien" onclick="editerQuestion('${q.id}')">Modifier</button>
+          <button class="principal" onclick="validerRapide('${q.id}')">Valider</button>
+        </div>
+      </li>`).join('') || '<li class="vide">Aucune question ne correspond à ces filtres.</li>';
   $('#compte-avalider').textContent = `${visibles.length} / ${AVALIDER.donnees.length} question(s) affichée(s)`;
 }
+
 
 /* Validation rapide depuis la liste "à relire" (2026-08-27) : pas besoin
  * d'ouvrir la fiche complète quand l'énoncé est déjà correct en l'état —
  * pensé pour traiter le retard de relecture par petits lots. */
 async function validerRapide(id) {
   try {
-    const { error } = await sb.from('questions').update({ a_valider: false, maj_le: new Date().toISOString() }).eq('id', id);
+    const themeChoisi = document.getElementById(`theme-avalider-${id}`)?.value;
+    const donnees = { a_valider: false, maj_le: new Date().toISOString() };
+    if (themeChoisi) donnees.theme_code = themeChoisi;
+    const { error } = await sb.from('questions').update(donnees).eq('id', id);
     if (error) throw error;
     AVALIDER.donnees = AVALIDER.donnees.filter(q => q.id !== id);
     document.getElementById(`ligne-avalider-${id}`)?.remove();
     if ($('#compte-avalider')) $('#compte-avalider').textContent =
-      `${$$('#corps-a-valider tr[id^="ligne-avalider-"]').length} / ${AVALIDER.donnees.length} question(s) affichée(s)`;
-    toast('Question validée');
+      `${$$('#corps-a-valider li[id^="ligne-avalider-"]').length} / ${AVALIDER.donnees.length} question(s) affichée(s)`;
+    toast('Question validée' + (themeChoisi ? ' — ' + esc(libelleTheme(themeChoisi)) : ''));
   } catch (e) { erreurSupabase('Validation de la question', e); }
 }
 

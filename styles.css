@@ -223,6 +223,9 @@ ol.copie ul { list-style: none; padding-left: 4px; margin: 4px 0; }
 ol.copie ul li { font-size: 14px; color: var(--gris); }
 ol.copie ul li.bonne { color: var(--vert); font-weight: 700; }
 ol.copie ul li.cochee { background: var(--jaune-fond); border-radius: 4px; padding: 0 4px; }
+.ligne-actions-avalider { display: flex; align-items: flex-end; gap: 12px; margin-top: 6px; }
+.ligne-actions-avalider label { font-size: 13px; }
+ol.copie li.vide { list-style: none; text-align: center; color: var(--gris-doux); font-style: italic; padding: 16px 0; }
 .explication { font-size: 13px; color: var(--gris-doux); font-style: italic; margin: 4px 0 0; }
 
 /* --------------------- épreuve pratique ---------------------------- */
