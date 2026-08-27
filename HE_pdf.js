@@ -303,6 +303,8 @@ async function genererTitrePdf(stagiaireId) {
   // le trait ne vienne se superposer au dossier employeur si celui-ci était
   // exceptionnellement long.
   if (y < yCarte - 3) {
+    doc.setFontSize(7).setTextColor(...BFS.gris).setFont('helvetica', 'bold');
+    doc.text('Après découper, plier en 3', largeur / 2, yCarte - 4.5, { align: 'center' });
     doc.setDrawColor(...BFS.gris).setLineDashPattern([2, 1.5], 0);
     doc.line(margeCarte, yCarte, largeur - margeCarte, yCarte);
     doc.setLineDashPattern([], 0);
@@ -389,11 +391,8 @@ async function genererTitrePdf(stagiaireId) {
    *             sessions_formation.lieu, saisi à la création de la session). */
   doc.addPage();
 
-  doc.setDrawColor(...BFS.gris).setLineDashPattern([2, 1.5], 0);
-  doc.line(margeCarte, yCarte, largeur - margeCarte, yCarte);
-  doc.setLineDashPattern([], 0);
-  doc.setFontSize(7).setTextColor(...BFS.gris).setFont('helvetica', 'italic');
-  doc.text('découper ici — verso du titre (à remettre au titulaire)', largeur / 2, yCarte - 1.5, { align: 'center' });
+  // 2026-08-27 (demande de Jeremy) : plus de trait/texte "découper ici" en
+  // page 2 — seul celui de la page 1 fait foi (même hauteur des deux côtés).
   piedDeVersion(doc, largeur, margeCarte, yCarte);
 
   const SITES = {
@@ -409,13 +408,9 @@ async function genererTitrePdf(stagiaireId) {
   const zHaut = yCarte + 3;
   const zBas = hauteurPage - margeCarte;
 
-  // Cadre extérieur + traits de pliage en pointillés entre les 3 volets.
-  doc.setDrawColor(...BFS.gris).setLineWidth(0.2);
-  doc.rect(margeCarte, zHaut, largeurUtileCarte, zBas - zHaut);
-  doc.setLineDashPattern([1.5, 1.2], 0);
-  doc.line(xV2, zHaut, xV2, zBas);
-  doc.line(xV3, zHaut, xV3, zBas);
-  doc.setLineDashPattern([], 0);
+  // 2026-08-27 (demande de Jeremy) : plus de cadre extérieur ni de traits de
+  // pliage pointillés (mal alignés avec le pliage réel à cause des marges
+  // réduites) — l'instruction "Après découper, plier en 3" (page 1) suffit.
 
   /* ---- Volet 1 : titulaire + employeur ---- */
   const xc1 = xV1 + largeurVolet / 2;
