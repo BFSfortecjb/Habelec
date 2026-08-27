@@ -253,6 +253,19 @@ function grilleMise(m, scenarios, obligatoire) {
           ${scenarios.map(s => `<option value="${s.id}" ${s.id === m.scenario_id ? 'selected' : ''}>
             ${esc(s.intitule)}</option>`).join('')}
         </select>
+        ${(() => {
+          // Fiche MSP téléchargeable (2026-08-27, demande de Jeremy) : reliée
+          // au scénario choisi via reference_ext (sans le suffixe -exec/-cdc,
+          // le PDF est commun aux deux rôles). MSP_RESSOURCES vient de
+          // HE_msp_ressources.js — absent tant qu'aucune fiche n'existe pour
+          // ce scénario, ce qui est le cas normal pour la plupart d'entre eux.
+          const scenario = scenarios.find(s => s.id === m.scenario_id);
+          const ref = scenario?.reference_ext?.replace(/-(exec|cdc)$/, '');
+          const ressource = ref && typeof MSP_RESSOURCES !== 'undefined' ? MSP_RESSOURCES[ref] : null;
+          return ressource
+            ? `<button type="button" class="lien" onclick="telechargerRessourceMsp('${ref}')">📄 Fiche MSP</button>`
+            : '';
+        })()}
         <span class="verdict">${complet
           ? (conforme ? '✔ conforme' : `✘ non conforme (${nbD} D, ${nbC} C)`)
           : 'à compléter'}</span>
@@ -456,4 +469,20 @@ async function cloturerEpreuve(epreuveId) {
     toast(ok ? 'Épreuve pratique validée' : 'Épreuve pratique non validée', ok ? 'ok' : 'erreur');
     rendrePratique($('#contenu'));
   } catch (e) { erreurSupabase('Validation de l\'épreuve', e); }
+}
+
+/* -------- Fiche MSP téléchargeable (2026-08-27, demande de Jeremy) ------
+ * Le PDF est embarqué en base64 dans HE_msp_ressources.js (MSP_RESSOURCES),
+ * même principe que LOGO_BFS dans HE_pdf.js — pas de bucket de stockage à
+ * gérer. Téléchargement déclenché via un <a> temporaire, comme ailleurs
+ * dans l'appli pour les exports. */
+function telechargerRessourceMsp(ref) {
+  const ressource = typeof MSP_RESSOURCES !== 'undefined' ? MSP_RESSOURCES[ref] : null;
+  if (!ressource) return toast('Fiche MSP indisponible', 'erreur');
+  const a = document.createElement('a');
+  a.href = ressource.data;
+  a.download = ressource.fichier;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
