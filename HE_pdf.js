@@ -260,10 +260,16 @@ async function genererTitrePdf(stagiaireId) {
 
   doc.autoTable({
     startY: y, margin: { left: marge, right: marge }, theme: 'grid',
-    styles: { fontSize: 8.5, cellPadding: 2.2 },
+    styles: { fontSize: 8.5, cellPadding: 2.2, minCellHeight: 11 },
     columnStyles: { 0: { cellWidth: largeurUtile * 0.55 }, 1: { cellWidth: largeurUtile * 0.45 } },
     body: [[`Date de l'avis : ${dateFr(new Date().toISOString())}`, 'Signature formateur :']],
   });
+  // Signature du formateur, pré-enregistrée une fois depuis "Mon compte"
+  // (2026-08-27, demande de Jeremy) : apposée automatiquement, plus besoin
+  // de signer à la main à chaque avis.
+  if (S.profil?.signature_data) {
+    doc.addImage(S.profil.signature_data, 'PNG', marge + largeurUtile * 0.55 + 28, doc.lastAutoTable.finalY - 9, 26, 8);
+  }
   y = doc.lastAutoTable.finalY + 5;
 
   doc.setFont('helvetica', 'normal').setFontSize(8.5).setTextColor(...BFS.gris);
@@ -284,9 +290,17 @@ async function genererTitrePdf(stagiaireId) {
     body: [
       [`ORGANISME DE FORMATION : ${org.raison_sociale || ''}`],
       [`RESPONSABLE : ${[org.signataire_nom, org.signataire_fonction].filter(Boolean).join(' — ')}`],
-      [{ content: `Date : ……………………………          Signature et cachet de l'organisme :`, styles: { minCellHeight: 10 } }],
+      [{ content: `Date : ${dateFr(new Date().toISOString())}          Signature et cachet de l'organisme :`,
+         styles: { minCellHeight: 13 } }],
     ],
   });
+  // Signature + cachet du représentant de l'organisme, pré-enregistrés une
+  // fois depuis l'onglet Organisme (2026-08-27, demande de Jeremy) : apposés
+  // automatiquement sur chaque avis. L'employeur, lui, continue de signer à
+  // la main sur le titre (voir plus bas, volet "L'EMPLOYEUR").
+  const yLigneOrg = doc.lastAutoTable.finalY - 11;
+  if (org.signature_data) doc.addImage(org.signature_data, 'PNG', largeur - marge - 55, yLigneOrg, 26, 9);
+  if (org.cachet_data) doc.addImage(org.cachet_data, 'PNG', largeur - marge - 24, yLigneOrg - 2, 20, 15);
   y = doc.lastAutoTable.finalY + 4;
 
   // Marges réduites pour la carte titre (recto + verso, la bande découpée
@@ -428,7 +442,10 @@ async function genererTitrePdf(stagiaireId) {
   doc.text('Société : ' + (org.raison_sociale || ''), xV1 + 3, zHaut + 46);
   doc.text('Nom : ' + (org.signataire_nom || ''), xV1 + 3, zHaut + 50);
   doc.text('Signature :', xV1 + 3, zHaut + 54);
-  if (org.signature_data) doc.addImage(org.signature_data, 'PNG', xV1 + 3, zHaut + 56, 28, 9);
+  // 2026-08-27 (demande de Jeremy) : l'employeur signe à la main sur le
+  // titre imprimé, pas de signature pré-enregistrée ici (elle n'a pas de
+  // compte dans l'appli — à ne pas confondre avec la signature de
+  // l'organisme de formation, apposée automatiquement plus haut sur l'avis).
 
   doc.setFont('helvetica', 'bold').setFontSize(7);
   doc.text('Délivré le ' + dateFr(titre.delivre_le), xV1 + 3, zBas - 6);
