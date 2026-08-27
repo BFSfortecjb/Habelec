@@ -855,11 +855,13 @@ async function importerStagiairesExcel(input) {
 /* ============ 6. Onglet Banque de questions ======================== */
 async function rendreBanque(zone) {
   zone.innerHTML = '<p class="chargement">Analyse de la banque…</p>';
-  const [{ data: couverture }, { data: compte }, { count: nbAValider }] = await Promise.all([
+  const [{ data: couverture }, { data: compte }, { count: nbAValider }, { data: doublons }] = await Promise.all([
     sb.from('v_couverture_banque').select('*').order('gabarit_code').order('theme_code'),
     sb.from('questions').select('theme_code, fondamentale, active'),
     sb.from('questions').select('id', { count: 'exact', head: true }).eq('a_valider', true),
+    sb.rpc('questions_doublons_probables', { p_seuil: 0.5 }),
   ]);
+  const nbDoublons = doublons?.length || 0;
 
   const parTheme = {};
   (compte || []).filter(q => q.active).forEach(q => {
@@ -881,7 +883,7 @@ async function rendreBanque(zone) {
           🖼 Importer des images en masse
           <input type="file" accept="image/*" multiple hidden onchange="importerImagesEnMasse(this)"></label>
         <button onclick="listerAValider()">Questions à relire${nbAValider ? ` (${nbAValider})` : ''}</button>
-        <button onclick="listerDoublons()">Doublons probables</button>
+        <button onclick="listerDoublons()">Doublons probables${nbDoublons ? ` (${nbDoublons})` : ''}</button>
         <button class="principal" onclick="editerQuestion(null)">+ Nouvelle question</button>
       </div>
     </div>
