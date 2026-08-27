@@ -39,12 +39,28 @@ function formatImageDataUrl(dataUrl) {
 // vraiment une image malgré l'extension...) ou des données corrompues ne
 // doivent JAMAIS empêcher la génération du reste du titre — on ignore juste
 // cette image-là, avec un avertissement en console (2026-08-27).
-function ajouterImageSure(doc, dataUrl, format, x, y, largeur, hauteur) {
+// x, y, largeurMax, hauteurMax délimitent une BOÎTE — l'image est réduite pour
+// y tenir en conservant ses proportions réelles (jamais étirée/déformée),
+// alignée en bas à gauche de la boîte (2026-08-27, correction demande de
+// Jeremy : un cachet+signature scanné dans une image large et basse
+// ressortait minuscule et déformé quand on forçait une largeur/hauteur fixes
+// sans rapport avec ses proportions d'origine).
+function ajouterImageSure(doc, dataUrl, format, x, y, largeurMax, hauteurMax) {
   if (!dataUrl) return;
   const f = format || formatImageDataUrl(dataUrl);
   if (!f) { console.warn('Image ignorée (format non reconnu) :', dataUrl.slice(0, 30)); return; }
   try {
-    doc.addImage(dataUrl, f, x, y, largeur, hauteur);
+    let largeur = largeurMax, hauteur = hauteurMax;
+    const props = doc.getImageProperties(dataUrl);
+    if (props?.width && props?.height) {
+      const ratio = props.width / props.height;
+      if (largeurMax / hauteurMax > ratio) {
+        largeur = hauteurMax * ratio;
+      } else {
+        hauteur = largeurMax / ratio;
+      }
+    }
+    doc.addImage(dataUrl, f, x, y + (hauteurMax - hauteur), largeur, hauteur);
   } catch (e) {
     console.warn('Image ignorée (fichier corrompu ou non supporté) :', e);
   }
@@ -327,7 +343,7 @@ async function genererTitrePdf(stagiaireId) {
   // la main sur le titre (voir plus bas, volet "L'EMPLOYEUR").
   const yLigneOrg = doc.lastAutoTable.finalY - 11;
   ajouterImageSure(doc, org.signature_data, null, largeur - marge - 55, yLigneOrg, 26, 9);
-  ajouterImageSure(doc, org.cachet_data, null, largeur - marge - 24, yLigneOrg - 2, 20, 15);
+  ajouterImageSure(doc, org.cachet_data, null, largeur - marge - 34, yLigneOrg - 4, 34, 17);
   y = doc.lastAutoTable.finalY + 4;
 
   // Marges réduites pour la carte titre (recto + verso, la bande découpée
