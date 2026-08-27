@@ -22,6 +22,17 @@ const PDF_VERSION = 'v14-2026-08-06';
 // donc dans la partie DOSSIER (conservée par l'employeur), jamais sur la
 // carte TITRE remise au titulaire — ce repère technique n'a rien à faire
 // entre les mains du salarié.
+// Format réel d'une image encodée en dataURL (2026-08-27) : le cachet de
+// l'organisme est une image UPLOADÉE par l'utilisateur (photo/scan), pas un
+// tracé de canvas — jamais forcément un PNG. jsPDF exige le bon format sous
+// peine d'exception "Incomplete or corrupt PNG file" si on lui ment.
+function formatImageDataUrl(dataUrl) {
+  const m = /^data:image\/(\w+);base64,/.exec(dataUrl || '');
+  const type = (m ? m[1] : 'png').toLowerCase();
+  if (type === 'jpg') return 'JPEG';
+  return type.toUpperCase();
+}
+
 function piedDeVersion(doc, largeur, marge, yCarte) {
   doc.setFont('helvetica', 'normal').setFontSize(6).setTextColor(180, 180, 180);
   doc.text(PDF_VERSION, largeur - marge, yCarte - 1.5, { align: 'right' });
@@ -300,7 +311,7 @@ async function genererTitrePdf(stagiaireId) {
   // la main sur le titre (voir plus bas, volet "L'EMPLOYEUR").
   const yLigneOrg = doc.lastAutoTable.finalY - 11;
   if (org.signature_data) doc.addImage(org.signature_data, 'PNG', largeur - marge - 55, yLigneOrg, 26, 9);
-  if (org.cachet_data) doc.addImage(org.cachet_data, 'PNG', largeur - marge - 24, yLigneOrg - 2, 20, 15);
+  if (org.cachet_data) doc.addImage(org.cachet_data, formatImageDataUrl(org.cachet_data), largeur - marge - 24, yLigneOrg - 2, 20, 15);
   y = doc.lastAutoTable.finalY + 4;
 
   // Marges réduites pour la carte titre (recto + verso, la bande découpée
