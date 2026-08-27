@@ -289,6 +289,14 @@ async function genererTitrePdf(stagiaireId) {
   });
   y = doc.lastAutoTable.finalY + 4;
 
+  // Marges réduites pour la carte titre (recto + verso, la bande découpée
+  // uniquement) — demande de Jeremy 2026-08-27 après un test d'impression :
+  // le dossier employeur au-dessus garde ses marges normales (marge), mais
+  // le titre remis au titulaire doit exploiter un maximum de largeur et
+  // descendre au plus près du bord bas de la page.
+  const margeCarte = 3;
+  const largeurUtileCarte = largeur - 2 * margeCarte;
+
   // Repère de découpe sur la page 1 (recto) : la bande sous ce trait n'est
   // PAS un simple espace vide, c'est le recto du titre à remettre au
   // titulaire (le tableau Annexe C ci-dessous). Le garde-fou évite juste que
@@ -296,11 +304,11 @@ async function genererTitrePdf(stagiaireId) {
   // exceptionnellement long.
   if (y < yCarte - 3) {
     doc.setDrawColor(...BFS.gris).setLineDashPattern([2, 1.5], 0);
-    doc.line(marge, yCarte, largeur - marge, yCarte);
+    doc.line(margeCarte, yCarte, largeur - margeCarte, yCarte);
     doc.setLineDashPattern([], 0);
     doc.setFontSize(7).setTextColor(...BFS.gris).setFont('helvetica', 'italic');
     doc.text('découper ici (même hauteur qu\'au verso)', largeur / 2, yCarte - 1.5, { align: 'center' });
-    piedDeVersion(doc, largeur, marge, yCarte);
+    piedDeVersion(doc, largeur, margeCarte, yCarte);
   }
 
   /* ================= TITRE — RECTO (tableau Annexe C, bas de page 1) =====
@@ -326,7 +334,7 @@ async function genererTitrePdf(stagiaireId) {
   }];
 
   doc.autoTable({
-    startY: yCarte + 6, margin: { left: marge, right: marge }, theme: 'grid',
+    startY: yCarte + 6, margin: { left: margeCarte, right: margeCarte }, theme: 'grid',
     // cellPadding relevé de 1.4 à 2.2 (2026-08-27, demande de Jeremy) : le
     // tableau s'arrêtait bien avant le bas de la bande découpée, alors que la
     // carte verso (page 2) remplit toute la sienne — l'un semblait plus
@@ -335,8 +343,8 @@ async function genererTitrePdf(stagiaireId) {
     styles: { fontSize: 7, cellPadding: 2.2, valign: 'middle' },
     headStyles: { fillColor: BFS.jaune, textColor: BFS.noir, fontStyle: 'bold', halign: 'center' },
     columnStyles: {
-      0: { cellWidth: 32 }, 1: { cellWidth: 28, fontStyle: 'bold' },
-      2: { cellWidth: 22 }, 3: { cellWidth: 44 }, 4: { cellWidth: largeurUtile - 32 - 28 - 22 - 44 },
+      0: { cellWidth: 34 }, 1: { cellWidth: 30, fontStyle: 'bold' },
+      2: { cellWidth: 23 }, 3: { cellWidth: 47 }, 4: { cellWidth: largeurUtileCarte - 34 - 30 - 23 - 47 },
     },
     head: [['Personnel', 'Symbole d\'habilitation\net attribut', 'Domaine\nde tension',
       'Installations concernées', 'Indications supplémentaires']],
@@ -352,22 +360,22 @@ async function genererTitrePdf(stagiaireId) {
   doc.setFontSize(5.6).setTextColor(...BFS.gris).setFont('helvetica', 'normal');
   doc.text('La rubrique « indications supplémentaires » doit être obligatoirement renseignée le cas '
     + 'échéant. Cette habilitation n\'autorise pas à elle seule son titulaire à effectuer de son '
-    + 'propre chef les opérations pour lesquelles il est habilité.', marge, yTableau, { maxWidth: largeurUtile });
+    + 'propre chef les opérations pour lesquelles il est habilité.', margeCarte, yTableau, { maxWidth: largeurUtileCarte });
   yTableau += 6;
 
   // Rappel des seuils de domaine de tension (alternatif / continu) — repris
   // tel quel du modèle Excel « Titre_habilitation_autovf.xlsx » fourni par
   // Jeremy (onglet Titre, lignes 14-15).
   doc.setFont('helvetica', 'bold').setFontSize(6).setTextColor(...BFS.noir);
-  doc.text('Domaine de tension :', marge, yTableau);
+  doc.text('Domaine de tension :', margeCarte, yTableau);
   doc.setFont('helvetica', 'normal').setFontSize(5.8).setTextColor(...BFS.gris);
   doc.text('Alternatif : TBT <= 50 V // 50 V < BT <= 1 000 V // 1 000 V < HTA <= 50 000 V // HTB > 50 000 V',
-    marge + 30, yTableau);
+    margeCarte + 30, yTableau);
   doc.text('Continu : TBT <= 120 V // 120 V < BT <= 1 500 V // 1 500 V < HTA <= 75 000 V // HTB > 75 000 V',
-    marge + 30, yTableau + 3.5);
+    margeCarte + 30, yTableau + 3.5);
 
   doc.setFont('helvetica', 'bold').setFontSize(6).setTextColor(...BFS.noir);
-  doc.text('N° de vérification : ' + (titre.numero || '—'), largeur - marge, yTableau + 3.5, { align: 'right' });
+  doc.text('N° de vérification : ' + (titre.numero || '—'), largeur - margeCarte, yTableau + 3.5, { align: 'right' });
 
   /* ================= TITRE — VERSO (carte 3 volets, page 2) ===========
    * Bande destinée à être découpée puis pliée en 3 (comme un dépliant),
@@ -382,11 +390,11 @@ async function genererTitrePdf(stagiaireId) {
   doc.addPage();
 
   doc.setDrawColor(...BFS.gris).setLineDashPattern([2, 1.5], 0);
-  doc.line(marge, yCarte, largeur - marge, yCarte);
+  doc.line(margeCarte, yCarte, largeur - margeCarte, yCarte);
   doc.setLineDashPattern([], 0);
   doc.setFontSize(7).setTextColor(...BFS.gris).setFont('helvetica', 'italic');
   doc.text('découper ici — verso du titre (à remettre au titulaire)', largeur / 2, yCarte - 1.5, { align: 'center' });
-  piedDeVersion(doc, largeur, marge, yCarte);
+  piedDeVersion(doc, largeur, margeCarte, yCarte);
 
   const SITES = {
     'Briec': { marque: 'Bretagne Formation Sécurité', tel: '02 98 82 29 67' },
@@ -394,16 +402,16 @@ async function genererTitrePdf(stagiaireId) {
   };
   const site = SITES[session?.lieu] || { marque: org.raison_sociale || '', tel: org.telephone || '' };
 
-  const largeurVolet = largeurUtile / 3;
-  const xV1 = marge;
-  const xV2 = marge + largeurVolet;
-  const xV3 = marge + 2 * largeurVolet;
+  const largeurVolet = largeurUtileCarte / 3;
+  const xV1 = margeCarte;
+  const xV2 = margeCarte + largeurVolet;
+  const xV3 = margeCarte + 2 * largeurVolet;
   const zHaut = yCarte + 3;
-  const zBas = hauteurPage - 5;
+  const zBas = hauteurPage - margeCarte;
 
   // Cadre extérieur + traits de pliage en pointillés entre les 3 volets.
   doc.setDrawColor(...BFS.gris).setLineWidth(0.2);
-  doc.rect(marge, zHaut, largeurUtile, zBas - zHaut);
+  doc.rect(margeCarte, zHaut, largeurUtileCarte, zBas - zHaut);
   doc.setLineDashPattern([1.5, 1.2], 0);
   doc.line(xV2, zHaut, xV2, zBas);
   doc.line(xV3, zHaut, xV3, zBas);
