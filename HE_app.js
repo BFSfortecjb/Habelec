@@ -1091,11 +1091,13 @@ async function listerDoublons() {
         <td>${esc(codeAffiche({ numero: p.numero_a, theme_code: p.theme_a }))}
           ${carte({ enonce: p.enonce_a, fondamentale: p.fondamentale_a, image_url: p.image_a, reponses: p.reponses_a })}
           <button class="lien" onclick="editerQuestion('${p.id_a}')">Ouvrir</button>
-          <button class="lien" onclick="desactiverDoublon('${p.id_a}', '${p.id_b}')">Désactiver celle-ci</button></td>
+          <button class="lien" onclick="desactiverDoublon('${p.id_a}', '${p.id_b}')">Désactiver celle-ci</button>
+          <button class="lien" onclick="supprimerDoublon('${p.id_a}', '${p.id_b}')">Supprimer</button></td>
         <td>${esc(codeAffiche({ numero: p.numero_b, theme_code: p.theme_b }))}
           ${carte({ enonce: p.enonce_b, fondamentale: p.fondamentale_b, image_url: p.image_b, reponses: p.reponses_b })}
           <button class="lien" onclick="editerQuestion('${p.id_b}')">Ouvrir</button>
-          <button class="lien" onclick="desactiverDoublon('${p.id_b}', '${p.id_a}')">Désactiver celle-ci</button></td>
+          <button class="lien" onclick="desactiverDoublon('${p.id_b}', '${p.id_a}')">Désactiver celle-ci</button>
+          <button class="lien" onclick="supprimerDoublon('${p.id_b}', '${p.id_a}')">Supprimer</button></td>
       </tr><tr id="ligne-doublon-actions-${p.id_a}-${p.id_b}"><td></td>
         <td colspan="2">
           ${p.theme_a === p.theme_b
@@ -1122,6 +1124,32 @@ async function desactiverDoublon(idADesactiver, idAutre) {
     document.getElementById(`ligne-doublon-actions-${idAutre}-${idADesactiver}`)?.remove();
     toast('Question désactivée');
   } catch (e) { erreurSupabase('Désactivation de la question', e); }
+}
+
+/* 2026-08-27 : suppression définitive depuis "Doublons probables" — utile
+ * pour un vrai doublon jamais encore utilisé dans un examen (sinon la base
+ * refuse la suppression : une question déjà tirée dans une copie doit être
+ * désactivée, pas supprimée, pour ne pas casser l'historique). Réservé aux
+ * administrateurs (policy contenu_suppr). */
+async function supprimerDoublon(idASupprimer, idAutre) {
+  if (!confirmer('Supprimer DÉFINITIVEMENT cette question ? Contrairement à "Désactiver", '
+    + 'impossible de revenir en arrière. Si elle a déjà servi dans une copie, la suppression '
+    + 'sera refusée automatiquement — utilise "Désactiver celle-ci" dans ce cas.')) return;
+  try {
+    const { error } = await sb.from('questions').delete().eq('id', idASupprimer);
+    if (error) {
+      if (error.code === '23503') {
+        return toast('Impossible : cette question a déjà été utilisée dans une copie — '
+          + 'désactive-la plutôt (bouton "Désactiver celle-ci").', 'erreur');
+      }
+      throw error;
+    }
+    document.getElementById(`ligne-doublon-${idASupprimer}-${idAutre}`)?.remove();
+    document.getElementById(`ligne-doublon-${idAutre}-${idASupprimer}`)?.remove();
+    document.getElementById(`ligne-doublon-actions-${idASupprimer}-${idAutre}`)?.remove();
+    document.getElementById(`ligne-doublon-actions-${idAutre}-${idASupprimer}`)?.remove();
+    toast('Question supprimée');
+  } catch (e) { erreurSupabase('Suppression de la question', e); }
 }
 
 async function lierPaireDoublon(idA, idB) {
