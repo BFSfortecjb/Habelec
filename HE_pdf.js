@@ -226,8 +226,27 @@ async function genererTitrePdf(stagiaireId) {
   doc.text('Résultats de l\'évaluation et avis d\'habilitation du formateur :', marge, y);
   y += 3;
 
-  const resultatTheorique = ep && ep.score_total
-    ? `${ep.score_brut}/${ep.score_total} (${Math.round((ep.taux || 0) * 100)} %)` : '—';
+  // Évaluation externe (2026-08-27, demande de Jeremy) : un stagiaire évalué
+  // par un formateur/organisme extérieur à BFS (ev.formateur non vide) n'a
+  // pas d'épreuve théorique Habelec (ep est null) — on affiche alors le
+  // résultat saisi manuellement (note/total/taux) et le nom du formateur
+  // externe à la place, avec une observation explicite sur l'origine du
+  // résultat. La table "Détail par titre visé" plus bas reste simplement
+  // absente pour ces stagiaires (gabaritsVises est vide sans ep), sans
+  // aucune modification nécessaire de cette partie du code.
+  const ev = st.evaluation_externe || null;
+  const resultatTheorique = ev
+    ? `${ev.note ?? '—'}/${ev.total ?? '—'}${ev.taux != null ? ` (${ev.taux} %)` : ''}`
+    : (ep && ep.score_total
+      ? `${ep.score_brut}/${ep.score_total} (${Math.round((ep.taux || 0) * 100)} %)` : '—');
+  const nomFormateurAffiche = ev
+    ? `${ev.formateur || '—'} (formateur externe)`
+    : (S.profil ? `${S.profil.nom || ''} ${S.profil.prenom || ''}`.trim() : '—');
+  const observationsAffichees = ev
+    ? `Évaluation théorique réalisée par un organisme/formateur extérieur à BFS.`
+      + ` ${ev.theorique_validee === false ? 'Non validée.' : 'Validée.'}`
+      + (ev.saisi_le ? ` Saisie le ${dateFr(ev.saisi_le)}.` : '')
+    : '';
   doc.autoTable({
     startY: y, margin: { left: marge, right: marge }, theme: 'grid',
     styles: { fontSize: 8.5, cellPadding: 2.2, valign: 'top' },
@@ -235,8 +254,7 @@ async function genererTitrePdf(stagiaireId) {
     columnStyles: { 0: { cellWidth: 34 }, 1: { cellWidth: 28 }, 2: { cellWidth: 40 }, 3: { cellWidth: 30 } },
     head: [['Formateur', 'Résultat théorique', 'Habilitation recommandée', 'Restrictions', 'Observations']],
     body: [
-      [S.profil ? `${S.profil.nom || ''} ${S.profil.prenom || ''}`.trim() : '—',
-        resultatTheorique, habilitationRecommandee, '', ''],
+      [nomFormateurAffiche, resultatTheorique, habilitationRecommandee, '', observationsAffichees],
       [{ content: '', colSpan: 5, styles: { minCellHeight: 4 } }],
     ],
   });

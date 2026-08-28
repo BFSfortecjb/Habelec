@@ -420,8 +420,94 @@ function ligneStagiaire(st, suivi, resultatsSymboles) {
       <button class="icone" title="Évaluation pratique" onclick="ouvrirPratique('${st.id}')">🔧</button>
       <button class="icone" title="Voir la copie corrigée" onclick="voirCopie('${st.id}')">📄</button>
       <button class="icone" title="Générer le titre d'habilitation (PDF)" onclick="genererTitrePdf('${st.id}')">🏅</button>
+      <button class="icone" title="Saisir un résultat de formateur externe (sans QCM Habelec)"
+        onclick="saisirResultatExterne('${st.id}')">📋${st.evaluation_externe ? ' ✓' : ''}</button>
       <button class="icone" title="Supprimer" onclick="supprimerStagiaire('${st.id}')">🗑</button>
     </td></tr>`;
+}
+
+/* ---------- Saisie simplifiée : résultat de formateur externe --------
+ * Demande de Jeremy (2026-08-27) : un formateur extérieur à BFS évalue le
+ * stagiaire avec son propre système (ex. QUIZAFON) et fournit sa propre
+ * attestation (modèle vu le 27/08 : titres évalués, note/total, % de
+ * réussite, validation théorique oui/non, symboles validés en pratique).
+ * La secrétaire ressaisit ce résultat ici — pas de QCM/pratique Habelec
+ * pour ce stagiaire, juste le résultat final. habelec.enregistrer_evaluation_externe
+ * écrit directement dans resultats_symbole ; "🏅 Générer le titre" fonctionne
+ * ensuite sans aucune autre modification. */
+async function saisirResultatExterne(id) {
+  const { data: st, error } = await sb.from('stagiaires')
+    .select('*, stagiaire_symboles(symbole_code)').eq('id', id).single();
+  if (error) return erreurSupabase('Lecture du stagiaire', error);
+  const symbolesVises = (st.stagiaire_symboles || []).map(x => x.symbole_code);
+  const ev = st.evaluation_externe || {};
+  // Pré-remplissage pratique : lu depuis resultats_symbole (pas stocké tel
+  // quel dans evaluation_externe, qui ne garde que le résumé théorique).
+  const { data: resultatsExistants } = await sb.from('resultats_symbole')
+    .select('symbole_code, pratique_ok').eq('stagiaire_id', id);
+  const symbolesValidesPratique = (resultatsExistants || [])
+    .filter(r => r.pratique_ok).map(r => r.symbole_code);
+
+  const parRole = {};
+  S.referentiel.symboles.forEach(sy => (parRole[sy.role] ||= []).push(sy));
+
+  ouvrirModale(`Résultat externe — ${st.nom} ${st.prenom}`, `
+    <p class="aide">À utiliser uniquement pour un résultat fourni par un formateur/organisme
+      extérieur à BFS (son propre système de test théorique). Remplace directement le résultat
+      du stagiaire, sans passer par le QCM ou la pratique Habelec.</p>
+    <form id="form-resultat-externe" class="formulaire">
+      <label>Nom du formateur externe
+        <input name="formateur_externe" value="${esc(ev.formateur || '')}" required></label>
+      <fieldset><legend>Titres évalués (cocher aussi ceux validés en pratique)</legend>
+        ${Object.entries(parRole).map(([role, liste]) => `
+          <div class="groupe-symboles"><b>${esc(role)}</b>
+            ${liste.map(sy => `<label class="case">
+              <input type="checkbox" name="symbole" value="${sy.code}"
+                ${symbolesVises.includes(sy.code) ? 'checked' : ''}
+                onchange="document.getElementById('prat-${sy.code}').disabled = !this.checked"> ${esc(sy.libelle)}
+              <label class="case" style="margin-left:8px">
+                <input type="checkbox" id="prat-${sy.code}" name="pratique" value="${sy.code}"
+                  ${!symbolesVises.includes(sy.code) ? 'disabled' : ''}
+                  ${symbolesValidesPratique.includes(sy.code) ? 'checked' : ''}> validé en pratique</label>
+            </label>`).join('')}
+          </div>`).join('')}
+      </fieldset>
+      <fieldset><legend>Résultat théorique global</legend>
+        <div class="grille-2">
+          <label>Note obtenue <input type="number" step="1" min="0" name="note" value="${ev.note ?? ''}" required></label>
+          <label>Total <input type="number" step="1" min="1" name="total" value="${ev.total ?? ''}" required></label>
+        </div>
+        <label class="case"><input type="checkbox" name="theorique_validee"
+          ${ev.theorique_validee !== false ? 'checked' : ''}> Évaluation théorique validée</label>
+      </fieldset>
+      <div class="pied-modale">
+        <button type="button" onclick="fermerModale()">Annuler</button>
+        <button type="submit" class="principal">Enregistrer</button>
+      </div>
+    </form>`);
+
+  $('#form-resultat-externe').addEventListener('submit', async ev2 => {
+    ev2.preventDefault();
+    const f = ev2.target;
+    const symboles = $$('#form-resultat-externe input[name=symbole]:checked').map(i => i.value);
+    const pratique = $$('#form-resultat-externe input[name=pratique]:checked').map(i => i.value);
+    if (!symboles.length) return toast('Coche au moins un titre évalué', 'erreur');
+    try {
+      const { error } = await sb.rpc('enregistrer_evaluation_externe', {
+        p_stagiaire_id: id,
+        p_symboles_vises: symboles,
+        p_symboles_valides_pratique: pratique,
+        p_note: parseFloat(f.note.value),
+        p_total: parseFloat(f.total.value),
+        p_theorique_validee: f.theorique_validee.checked,
+        p_formateur_externe: f.formateur_externe.value.trim(),
+      });
+      if (error) throw error;
+      fermerModale();
+      toast('Résultat externe enregistré');
+      rendreDetailSession($('#contenu'));
+    } catch (e) { erreurSupabase('Enregistrement du résultat externe', e); }
+  });
 }
 
 async function basculerOuverture() {

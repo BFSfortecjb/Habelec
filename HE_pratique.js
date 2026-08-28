@@ -95,6 +95,11 @@ async function rendrePratique(zone) {
     ({ epreuves, scenarios, theorieOkParSymbole } = snap);
   }
 
+  // Cache des scénarios par id (2026-08-28, demande de Jeremy) : sert au popup
+  // "Consignes" ci-dessous, pour lire directement contexte/aléa/attendus sans
+  // requête réseau supplémentaire au clic (utilisable aussi hors-ligne).
+  S._scenariosParId = Object.fromEntries((scenarios || []).map(s => [s.id, s]));
+
   const symbolesStagiaire = (st.stagiaire_symboles || []).map(x => x.symbole_code);
   const theorieEchoueePourGabarit = gabaritCode => symbolesStagiaire.some(sym =>
     (S.referentiel.gabaritsParSymbole[sym] || []).includes(gabaritCode) && theorieOkParSymbole[sym] === false);
@@ -262,9 +267,11 @@ function grilleMise(m, scenarios, obligatoire) {
           const scenario = scenarios.find(s => s.id === m.scenario_id);
           const ref = scenario?.reference_ext?.replace(/-(exec|cdc)$/, '');
           const ressource = ref && typeof MSP_RESSOURCES !== 'undefined' ? MSP_RESSOURCES[ref] : null;
-          return ressource
+          return `${ressource
             ? `<button type="button" class="lien" onclick="telechargerRessourceMsp('${ref}')">📄 Fiche MSP</button>`
-            : '';
+            : ''}${m.scenario_id
+            ? `<button type="button" class="lien" onclick="afficherConsignesMsp('${m.scenario_id}')">📋 Consignes</button>`
+            : ''}`;
         })()}
         <span class="verdict">${complet
           ? (conforme ? '✔ conforme' : `✘ non conforme (${nbD} D, ${nbC} C)`)
@@ -485,4 +492,45 @@ function telechargerRessourceMsp(ref) {
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+/* -------- Popup Consignes MSP (2026-08-28, demande de Jeremy) -----------
+ * Complément du bouton "Fiche MSP" ci-dessus : plutôt que de rouvrir le PDF
+ * complet (peu pratique sur téléphone/tablette pendant l'évaluation sur le
+ * terrain), un popup résume juste les consignes à donner au stagiaire et ce
+ * qui est attendu à SON niveau. Le scénario choisi (m.scenario_id) est déjà
+ * spécifique au rôle de la mise en situation — le PDF, lui, détaille les
+ * deux rôles (Exécutant ET Chef de chantier) côte à côte, ce que Jeremy a
+ * explicitement voulu éviter ici pour simplifier la lecture sur mobile. */
+function afficherConsignesMsp(scenarioId) {
+  const s = (S._scenariosParId || {})[scenarioId];
+  if (!s) return toast('Consignes indisponibles pour ce scénario', 'erreur');
+
+  const puces = texte => (texte || '')
+    .split(';').map(t => t.trim()).filter(Boolean)
+    .map(t => `<li>${esc(t)}</li>`).join('') || '<li>—</li>';
+
+  ouvrirModale(`Consignes — ${esc(s.intitule)}`, `
+    <div class="consignes-msp">
+      <p class="aide">Niveau évalué : <b>${esc(s.role || '—')}</b></p>
+
+      <h4>Situation à donner au stagiaire</h4>
+      <p>${esc(s.contexte_technique || '—')}</p>
+      ${s.variation_environnement ? `<p><b>Lieu :</b> ${esc(s.variation_environnement)}</p>` : ''}
+      ${s.variation_documentaire ? `<p><b>Documents fournis :</b> ${esc(s.variation_documentaire)}</p>` : ''}
+
+      <h4>Aléa à déclencher en cours de mise en situation</h4>
+      <p>${esc(s.probleme_ou_alea || '—')}</p>
+
+      <h4>Attendus à ce niveau</h4>
+      <ul>${puces(s.attendus_principaux)}</ul>
+
+      ${s.motif_arret_obligatoire ? `<h4>Motif d'arrêt obligatoire</h4>
+      <ul>${puces(s.motif_arret_obligatoire)}</ul>` : ''}
+
+      ${s.materiel_necessaire ? `<p><b>Matériel nécessaire :</b> ${esc(s.materiel_necessaire)}</p>` : ''}
+    </div>
+    <div class="pied-modale">
+      <button type="button" class="principal" onclick="fermerModale()">Fermer</button>
+    </div>`);
 }

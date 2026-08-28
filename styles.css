@@ -207,6 +207,14 @@ label.case input { width: auto; margin: 0; accent-color: var(--jaune); }
 .corps-modale { padding: 18px; overflow-x: hidden; }
 .pied-modale { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
+/* Popup Consignes MSP (2026-08-28) : lecture rapide sur téléphone/tablette
+   pendant l'évaluation pratique sur le terrain. */
+.consignes-msp h4 { margin: 14px 0 4px; font-size: 14px; color: var(--noir); }
+.consignes-msp h4:first-of-type { margin-top: 6px; }
+.consignes-msp p, .consignes-msp ul { margin: 0 0 4px; font-size: 14px; }
+.consignes-msp ul { padding-left: 18px; }
+
+
 /* ------------------------- copie corrigée -------------------------- */
 .bilan { padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 15px; }
 .bilan.ok { background: var(--vert-fond); color: var(--vert); border-left: 4px solid var(--vert); }
