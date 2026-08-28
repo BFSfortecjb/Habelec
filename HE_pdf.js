@@ -16,7 +16,7 @@ const { jsPDF } = window.jspdf;
 // après un déploiement, que le navigateur a bien chargé le dernier
 // HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
 // modification notable de ce fichier ; aucun effet fonctionnel.
-const PDF_VERSION = 'v14-2026-08-06';
+const PDF_VERSION = 'v15-2026-08-28';
 
 // 2026-08-27 (demande de Jeremy) : affiché au-dessus du trait de découpe,
 // donc dans la partie DOSSIER (conservée par l'employeur), jamais sur la
@@ -131,12 +131,15 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
     const { data } = await sb.from('titres_habilitation').select('*').eq('id', id).single();
     titre = data;
   } catch (e) {
-    // Pas de titre validé : on propose l'avis défavorable motivé
-    if (String(e.message).includes('Aucun titre validé')) {
-      return genererAvisDefavorable(stagiaireId);
-    }
     return erreurSupabase('Génération du titre', e);
   }
+  // 2026-08-28 (demande de Jeremy) : plus de document de repli sommaire en
+  // cas d'échec — habelec.generer_titre() crée désormais toujours une ligne
+  // titres_habilitation, même sans aucun symbole favorable (symboles = []).
+  // Ce même document stylé est alors produit pour justifier l'échec auprès
+  // du client, avec "Habilitation recommandée : aucune" et les cases du
+  // titre barrées en diagonal — voir plus bas (const echec).
+  const echec = !titre.symboles || titre.symboles.length === 0;
 
   const { data: stRaw } = await sb.from('stagiaires')
     .select('*, stagiaire_symboles(symbole_code)').eq('id', stagiaireId).single();
@@ -160,7 +163,10 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
   const org = S.organisme || {};
   const c = titre.contenu || {};
   const lignes = c.lignes || {};
-  const habilitationRecommandee = Object.values(lignes).flat().join(', ') || '—';
+  // 2026-08-28 (demande de Jeremy) : en cas d'échec (aucun symbole
+  // favorable), "aucune" plutôt que "—" — formulation explicite qui
+  // justifie l'absence d'habilitation auprès du client.
+  const habilitationRecommandee = echec ? 'aucune' : (Object.values(lignes).flat().join(', ') || '—');
 
   // Détail par titre visé (2026-08-12) : % de réussite théorique et score aux
   // questions fondamentales, sur le même périmètre que theorie_gabarit_ok()
@@ -222,6 +228,17 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
   doc.setDrawColor(...BFS.jaune).setLineWidth(0.8).line(largeur / 2 - 22, y, largeur / 2 + 22, y);
   doc.setLineWidth(0.2);
   y += 5;
+
+  // Bandeau ÉCHEC (2026-08-28, demande de Jeremy) : rend le résultat visible
+  // au premier coup d'œil sur ce document par ailleurs identique à un titre
+  // validé — justifie l'absence d'habilitation auprès du client.
+  if (echec) {
+    doc.setFillColor(...BFS.rouge).rect(marge, y - 3.5, largeurUtile, 7, 'F');
+    doc.setTextColor(255, 255, 255).setFont('helvetica', 'bold').setFontSize(9.5);
+    doc.text('ÉCHEC — AUCUNE HABILITATION DÉLIVRÉE À L\'ISSUE DE CETTE ÉVALUATION', largeur / 2, y + 1, { align: 'center' });
+    doc.setTextColor(...BFS.noir);
+    y += 7;
+  }
 
   doc.setFont('helvetica', 'normal').setFontSize(9);
   doc.text('NOM : ' + (st.nom || ''), marge, y);
@@ -487,6 +504,21 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
       ligneSection('Opérations d\'ordre électrique'),
       ...elec.map(ligneAvis),
     ],
+    // Cases barrées en diagonal (2026-08-28, demande de Jeremy) : en cas
+    // d'échec, chaque ligne « Personnel / Symbole / ... » du tableau Annexe C
+    // est barrée d'un trait rouge en diagonal pour marquer visuellement
+    // qu'aucune habilitation n'est délivrée sur ce titre — la colonne 4
+    // (dernière) sert de déclencheur (une seule fois par ligne) et le trait
+    // couvre toute la largeur de la ligne, pas seulement cette cellule ;
+    // les lignes de section ("Opérations d'ordre ...", colSpan 5, colonne 0
+    // uniquement) ne sont volontairement pas barrées.
+    didDrawCell: data => {
+      if (!echec || data.section !== 'body' || data.column.index !== 4) return;
+      doc.setDrawColor(...BFS.rouge).setLineWidth(0.5);
+      const xGauche = margeCarte, xDroite = margeCarte + largeurUtileCarte;
+      doc.line(xGauche, data.cell.y, xDroite, data.cell.y + data.cell.height);
+      doc.setLineWidth(0.2);
+    },
   });
   let yTableau = doc.lastAutoTable.finalY + 2;
 
@@ -570,11 +602,20 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
   // compte dans l'appli — à ne pas confondre avec la signature de
   // l'organisme de formation, apposée automatiquement plus haut sur l'avis).
 
-  doc.setFont('helvetica', 'bold').setFontSize(7);
-  doc.text('Délivré le ' + dateFr(titre.delivre_le), xV1 + 3, zBas - 6);
-  doc.setFont('helvetica', 'normal');
-  doc.text('Validité : ' + (org.validite_annees || 3) + ' ans — à recycler avant le '
-    + dateFr(titre.recycler_avant), xV1 + 3, zBas - 2.5, { maxWidth: largeurVolet - 6 });
+  // 2026-08-28 (demande de Jeremy) : en cas d'échec, pas de date de
+  // délivrance ni de validité à afficher — aucune habilitation n'est
+  // accordée, donc rien à faire courir dans le temps.
+  if (echec) {
+    doc.setFont('helvetica', 'bold').setFontSize(7).setTextColor(...BFS.rouge);
+    doc.text('Aucune habilitation délivrée.', xV1 + 3, zBas - 4, { maxWidth: largeurVolet - 6 });
+    doc.setTextColor(...BFS.noir);
+  } else {
+    doc.setFont('helvetica', 'bold').setFontSize(7);
+    doc.text('Délivré le ' + dateFr(titre.delivre_le), xV1 + 3, zBas - 6);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Validité : ' + (org.validite_annees || 3) + ' ans — à recycler avant le '
+      + dateFr(titre.recycler_avant), xV1 + 3, zBas - 2.5, { maxWidth: largeurVolet - 6 });
+  }
 
   /* ---- Volet 2 : texte réglementaire AVIS ---- */
   const xc2 = xV2 + largeurVolet / 2;
@@ -606,6 +647,14 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
   doc.setFont('helvetica', 'normal').setFontSize(6).setTextColor(...BFS.gris);
   doc.text('N° ' + (titre.numero || '—'), xc3, yEncadre + 18.5, { align: 'center' });
   doc.setTextColor(...BFS.noir);
+  // 2026-08-28 (demande de Jeremy) : encadré "TITRE D'HABILITATION
+  // ÉLECTRIQUE" barré en diagonal en cas d'échec, cohérent avec les lignes
+  // barrées du tableau Annexe C côté recto.
+  if (echec) {
+    doc.setDrawColor(...BFS.rouge).setLineWidth(0.6);
+    doc.line(xV3 + 4, yEncadre, xV3 + 4 + (largeurVolet - 8), yEncadre + 16);
+    doc.setLineWidth(0.2);
+  }
 
   doc.setFont('helvetica', 'bold').setFontSize(7.5).setTextColor(...BFS.noir);
   doc.text(site.marque, xc3, yEncadre + 24, { align: 'center', maxWidth: largeurVolet - 6 });
@@ -623,56 +672,13 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
   return { doc, nomFichier, stagiaire: st };
 }
 
-/* ------------------- 2. Avis défavorable ---------------------------- */
-async function genererAvisDefavorable(stagiaireId) {
-  const { data: st } = await sb.from('stagiaires').select('*').eq('id', stagiaireId).single();
-  const { data: res } = await sb.from('resultats_symbole')
-    .select('*').eq('stagiaire_id', stagiaireId).order('symbole_code');
-  const { data: ep } = await sb.from('epreuves_theoriques')
-    .select('*').eq('stagiaire_id', stagiaireId).maybeSingle();
-
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const marge = 15;
-  doc.setFont('helvetica', 'bold').setFontSize(15);
-  doc.text('AVIS APRÈS FORMATION', 105, 22, { align: 'center' });
-  doc.setFontSize(11).setFont('helvetica', 'normal');
-  doc.text((S.organisme?.raison_sociale || ''), marge, 32);
-  doc.setFont('helvetica', 'bold');
-  doc.text(`${st.nom} ${st.prenom}`, marge, 44);
-  doc.setFont('helvetica', 'normal').setFontSize(10);
-  doc.text(`${st.fonction || ''} — ${st.affectation || ''}`, marge, 50);
-
-  doc.autoTable({
-    startY: 58, margin: { left: marge, right: marge }, theme: 'grid',
-    styles: { fontSize: 9 },
-    headStyles: { fillColor: [235, 238, 242], textColor: 20 },
-    head: [['Titre visé', 'Théorie', 'Pratique', 'Avis', 'Motif']],
-    body: (res || []).map(r => [
-      libelleSymbole(r.symbole_code),
-      r.theorie_ok ? 'Validée' : 'Non validée',
-      r.pratique_ok ? 'Validée' : 'Non validée',
-      r.avis === 'favorable' ? 'FAVORABLE' : 'DÉFAVORABLE',
-      r.motif || '—',
-    ]),
-  });
-
-  let y = doc.lastAutoTable.finalY + 8;
-  if (ep) {
-    doc.setFontSize(9);
-    doc.text(`Épreuve théorique : ${ep.score_brut}/${ep.score_total} `
-      + `(${Math.round((ep.taux || 0) * 100)} %) — questions fondamentales : `
-      + `${ep.fondamentales_ok ? 'toutes justes' : 'au moins une ratée'}.`, marge, y);
-    y += 6;
-  }
-  doc.setFontSize(8).setTextColor(90);
-  doc.text('Évaluation réalisée conformément à l\'Annexe D.3 de la NF C18-510. '
-    + 'Critère théorique : 100 % des questions fondamentales et 70 % de bonnes réponses. '
-    + 'Critère pratique : aucune erreur grave (D) et une seule erreur majeure (C) au maximum '
-    + 'par mise en situation.', marge, y, { maxWidth: 180 });
-
-  doc.save(`avis_${st.nom}_${st.prenom}.pdf`.replace(/\s+/g, '_'));
-  toast('Avis généré (aucun titre validé)', 'erreur');
-}
+/* ------------------- 2. (ancien avis défavorable, retiré) -----------
+ * 2026-08-28 (demande de Jeremy) : genererAvisDefavorable produisait un
+ * document de repli très sommaire, insuffisant pour justifier l'échec
+ * auprès du client. Supprimé — le cas d'échec passe désormais par
+ * genererTitrePdf ci-dessus (const echec), qui produit le même document
+ * stylé qu'un titre validé, avec "Habilitation recommandée : aucune" et
+ * les cases du titre barrées en diagonal. */
 
 /* ------------------- 3. Procès-verbal de session -------------------- */
 /* ------------------- 2 bis. Preuve d'examen (2026-08-28) ------------------
