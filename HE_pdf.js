@@ -113,7 +113,7 @@ function caseACocher(doc, x, y, cochee, taille = 3.2) {
  *     positionnée en bas exprès pour être découpée aux ciseaux après
  *     impression, sans toucher au reste du document qui sert de dossier
  *     employeur. */
-async function genererTitrePdf(stagiaireId) {
+async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
   // Garde-fou (2026-08-28, demande de Jeremy) : impossible de générer le titre
   // tant qu'un titre en échec (avis defavorable) n'a pas de préconisation —
   // normalement déjà demandée en fermant la copie corrigée (voirCopie), ce
@@ -226,6 +226,12 @@ async function genererTitrePdf(stagiaireId) {
   doc.setFont('helvetica', 'normal').setFontSize(9);
   doc.text('NOM : ' + (st.nom || ''), marge, y);
   doc.text('Prénom : ' + (st.prenom || ''), marge + 70, y);
+  y += 6;
+  // Entreprise (employeur) du stagiaire (2026-08-28, demande de Jeremy) —
+  // distincte de l'organisme de formation affiché plus bas dans le bloc
+  // "ORGANISME DE FORMATION : BFS...". Repli sur l'entreprise de la session
+  // si le stagiaire n'a pas la sienne propre (formation intra-entreprise).
+  doc.text('Entreprise : ' + (st.entreprise || session?.entreprise || '—'), marge, y);
   y += 6;
   doc.text('Dates de la formation : ' + [dateFr(session?.date_debut), dateFr(session?.date_fin)]
     .filter(Boolean).join(' au '), marge, y);
@@ -550,8 +556,14 @@ async function genererTitrePdf(stagiaireId) {
   doc.setFont('helvetica', 'bold').setFontSize(8);
   doc.text('L\'EMPLOYEUR', xc1, zHaut + 40, { align: 'center' });
   doc.setFont('helvetica', 'normal').setFontSize(7.5);
-  doc.text('Société : ' + (org.raison_sociale || ''), xV1 + 3, zHaut + 46);
-  doc.text('Nom : ' + (org.signataire_nom || ''), xV1 + 3, zHaut + 50);
+  // Société de l'EMPLOYEUR du stagiaire (2026-08-28, correctif demande de
+  // Jeremy) — org est l'organisme de FORMATION (BFS), jamais l'employeur :
+  // on affichait par erreur org.raison_sociale ici. La bonne valeur vient du
+  // stagiaire (saisie par le formateur à la création, ou par le stagiaire
+  // lui-même à la connexion au QCM), avec repli sur l'entreprise de la
+  // session (utile en formation intra-entreprise).
+  doc.text('Société : ' + (st.entreprise || session?.entreprise || ''), xV1 + 3, zHaut + 46);
+  doc.text('Nom :', xV1 + 3, zHaut + 50);
   doc.text('Signature :', xV1 + 3, zHaut + 54);
   // 2026-08-27 (demande de Jeremy) : l'employeur signe à la main sur le
   // titre imprimé, pas de signature pré-enregistrée ici (elle n'a pas de
@@ -600,8 +612,15 @@ async function genererTitrePdf(stagiaireId) {
   doc.setFont('helvetica', 'normal').setFontSize(7).setTextColor(...BFS.gris);
   doc.text(site.tel, xc3, yEncadre + 29, { align: 'center' });
 
-  doc.save(`titre_habilitation_${st.nom}_${st.prenom}.pdf`.replace(/\s+/g, '_'));
-  toast('Titre et avis d\'habilitation générés');
+  // Nom de fichier commençant par le NOM du stagiaire (2026-08-28, demande de
+  // Jeremy) : les pièces jointes de l'envoi secrétariat doivent se classer
+  // par ordre alphabétique du stagiaire dans la boîte mail.
+  const nomFichier = `${st.nom}_${st.prenom}_avis_habilitation.pdf`.replace(/\s+/g, '_');
+  if (sauvegarder) {
+    doc.save(nomFichier);
+    toast('Titre et avis d\'habilitation générés');
+  }
+  return { doc, nomFichier, stagiaire: st };
 }
 
 /* ------------------- 2. Avis défavorable ---------------------------- */
@@ -656,6 +675,238 @@ async function genererAvisDefavorable(stagiaireId) {
 }
 
 /* ------------------- 3. Procès-verbal de session -------------------- */
+/* ------------------- 2 bis. Preuve d'examen (2026-08-28) ------------------
+ * Document annexé à l'avis dans l'envoi secrétariat (demande de Jeremy) :
+ * mêmes couleurs BFS que l'avis, un score théorique + le détail des
+ * savoir-faire évalués en pratique (grille A/B/C/D, verbatim depuis
+ * criteres_savoir_faire) PAR TITRE VISÉ, plus les préconisations du
+ * formateur en cas d'échec. Construit avec autotable comme le reste du
+ * fichier — pagination automatique, pas de gestion manuelle du débordement.
+ * Cas particulier "formateur externe" (st.evaluation_externe) : pas de
+ * détail par savoir-faire disponible (aucune évaluation Habelec), affiche
+ * seulement le résultat théorique global saisi et le statut pratique par
+ * titre coché "validé en pratique".
+ * ========================================================================= */
+async function construireDocPreuveExamen(stagiaireId) {
+  const { data: st } = await sb.from('stagiaires')
+    .select('*, stagiaire_symboles(symbole_code)').eq('id', stagiaireId).single();
+  if (!st) throw new Error('Stagiaire introuvable');
+  const symbolesStagiaire = (st.stagiaire_symboles || []).map(x => x.symbole_code);
+
+  const [{ data: session }, { data: ep }, { data: resultats }] = await Promise.all([
+    sb.from('sessions_formation').select('*').eq('id', st.session_id).single(),
+    sb.from('epreuves_theoriques').select('*').eq('stagiaire_id', stagiaireId).maybeSingle(),
+    sb.from('resultats_symbole').select('*').eq('stagiaire_id', stagiaireId),
+  ]);
+  const preconisationParSymbole = Object.fromEntries(
+    (resultats || []).filter(r => r.preconisation).map(r => [r.symbole_code, r.preconisation]));
+  const pratiqueOkParSymbole = Object.fromEntries((resultats || []).map(r => [r.symbole_code, r.pratique_ok]));
+
+  const ev = st.evaluation_externe || null;
+  const gabaritsVises = ep?.gabarits || [];
+  let titresData = [];
+
+  if (ev) {
+    titresData = symbolesStagiaire.map(sym => ({
+      libelle: libelleSymbole(sym),
+      theorie: { texte: `${ev.note ?? '—'}/${ev.total ?? '—'}${ev.taux != null ? ` (${ev.taux} %)` : ''}`,
+        ok: ev.theorique_validee !== false },
+      pratique: null,
+      pratiqueVerdict: pratiqueOkParSymbole[sym],
+      preconisation: preconisationParSymbole[sym] || null,
+    }));
+  } else {
+    const [detailsTheorie, { data: pratiques }] = await Promise.all([
+      Promise.all(gabaritsVises.map(g =>
+        rpc('theorie_gabarit_detail', { p_epreuve_id: ep.id, p_gabarit_code: g }).catch(() => null))),
+      gabaritsVises.length
+        ? sb.from('epreuves_pratiques')
+            .select(`gabarit_code, reussie, mises_en_situation(id, numero,
+                       evaluations_savoir_faire(note,
+                         gabarit_savoir_faire(position, criteres_savoir_faire(code, libelle))))`)
+            .eq('stagiaire_id', stagiaireId).in('gabarit_code', gabaritsVises)
+        : Promise.resolve({ data: [] }),
+    ]);
+    const detailParGabarit = Object.fromEntries(gabaritsVises.map((g, i) => [g, detailsTheorie[i]]));
+    const pratiqueParGabarit = Object.fromEntries((pratiques || []).map(p => [p.gabarit_code, p]));
+    const fondNormeParGabarit = Object.fromEntries(gabaritsVises.map(g => [g,
+      (S.referentiel?.quotas || [])
+        .filter(q => q.gabarit_code === g)
+        .reduce((somme, q) => somme + (q.nb_fondamentales || 0), 0)]));
+
+    titresData = gabaritsVises.map(g => {
+      const d = detailParGabarit[g];
+      const p = pratiqueParGabarit[g];
+      const refFond = fondNormeParGabarit[g] || 0;
+      const symbolesVises = symbolesStagiaire
+        .filter(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g));
+      const libelleTitre = symbolesVises.length
+        ? symbolesVises.map(libelleSymbole).join(' / ') : libelleGabarit(g);
+
+      // Mise en situation retenue pour le détail affiché : la plus récente
+      // qui comporte au moins une évaluation notée (même principe que
+      // l'écran pratique — miseComplete()/miseConforme() dans HE_pratique.js).
+      const mises = (p?.mises_en_situation || []).slice().sort((a, b) => b.numero - a.numero);
+      const miseRetenue = mises.find(m => (m.evaluations_savoir_faire || []).some(e => e.note)) || null;
+      const items = miseRetenue
+        ? miseRetenue.evaluations_savoir_faire
+            .filter(e => e.note && e.gabarit_savoir_faire?.criteres_savoir_faire)
+            .sort((a, b) => a.gabarit_savoir_faire.position - b.gabarit_savoir_faire.position)
+            .map(e => ({ libelle: e.gabarit_savoir_faire.criteres_savoir_faire.libelle, note: e.note }))
+        : null;
+
+      return {
+        libelle: libelleTitre,
+        theorie: d ? { texte: `${d.justes}/${d.total} (${d.taux} %)`, ok: d.ok,
+          fond: refFond === 0 ? 'aucune exigée' : `${d.fond_justes}/${refFond}`, fondOk: d.fond_ok } : null,
+        pratique: items,
+        pratiqueVerdict: p?.reussie,
+        preconisation: symbolesVises.map(sym => preconisationParSymbole[sym]).find(Boolean) || null,
+      };
+    });
+  }
+
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const largeur = 210, marge = 15, largeurUtile = largeur - 2 * marge;
+  const NOTE_COULEUR = { A: BFS.vert, B: BFS.vert, C: [201, 122, 22], D: BFS.rouge };
+  const NOTE_LIBELLE = { A: 'Sans erreur', B: 'Erreur acceptable', C: 'Erreur majeure', D: 'Erreur grave' };
+  let y = marge;
+
+  doc.addImage(LOGO_BFS, 'PNG', marge, y - 3, 20, 20 * 119 / 222);
+  doc.setTextColor(...BFS.noir).setFont('helvetica', 'bold').setFontSize(15);
+  doc.text('PREUVE D\'EXAMEN — HABILITATION ÉLECTRIQUE', largeur / 2, y, { align: 'center' });
+  y += 3;
+  doc.setDrawColor(...BFS.jaune).setLineWidth(0.8).line(largeur / 2 - 30, y, largeur / 2 + 30, y);
+  doc.setLineWidth(0.2);
+  y += 5;
+  doc.setFont('helvetica', 'normal').setFontSize(8.5).setTextColor(...BFS.gris);
+  doc.text('Session : ' + (session?.intitule || ''), largeur / 2, y, { align: 'center' });
+  y += 4;
+  doc.setFontSize(7.5);
+  doc.text('Document annexé à l\'avis d\'habilitation — NF C18-510', largeur / 2, y, { align: 'center' });
+  y += 8;
+
+  doc.autoTable({
+    startY: y, margin: { left: marge, right: marge }, theme: 'grid',
+    styles: { fontSize: 8.5, cellPadding: 2.2 },
+    columnStyles: { 0: { cellWidth: 32, fontStyle: 'bold' } },
+    body: [
+      ['ENTREPRISE', st.entreprise || session?.entreprise || '—'],
+      ['CANDIDAT', `${st.nom || ''} ${st.prenom || ''}`.trim()],
+      ['FORMATEUR', S.profil ? `${S.profil.nom || ''} ${S.profil.prenom || ''}`.trim() : '—'],
+    ],
+  });
+  y = doc.lastAutoTable.finalY + 4;
+
+  doc.autoTable({
+    startY: y, margin: { left: marge, right: marge }, theme: 'grid',
+    styles: { fontSize: 8, cellPadding: 1.8, valign: 'middle' },
+    headStyles: { fillColor: BFS.jaune, textColor: BFS.noir, fontStyle: 'bold' },
+    columnStyles: {
+      0: { cellWidth: largeurUtile * 0.34 },
+      1: { cellWidth: largeurUtile * 0.33, halign: 'center' },
+      2: { cellWidth: largeurUtile * 0.33, halign: 'center' },
+    },
+    head: [[
+      { content: 'TEST THÉORIQUE', styles: { halign: 'left' } },
+      { content: 'Résultat', styles: { halign: 'center' } },
+      { content: 'Questions fondamentales', styles: { halign: 'center' } },
+    ]],
+    body: titresData.map(t => {
+      const cellule = (texte, couleur) => couleur
+        ? { content: texte, styles: { textColor: couleur, fontStyle: 'bold' } } : texte;
+      return [
+        t.libelle,
+        t.theorie ? cellule(t.theorie.texte, t.theorie.ok ? BFS.vert : BFS.rouge) : '—',
+        t.theorie?.fond ? cellule(t.theorie.fond, t.theorie.fondOk ? BFS.vert : BFS.rouge)
+          : (t.theorie ? '—' : ''),
+      ];
+    }),
+  });
+  y = doc.lastAutoTable.finalY + 4;
+
+  // Détail pratique : une section par titre (ligne pleine largeur, fond gris)
+  // suivie de ses items de savoir-faire (2 colonnes) — autotable gère la
+  // pagination automatiquement si ça dépasse une page.
+  const corpsPratique = [];
+  titresData.forEach(t => {
+    corpsPratique.push([{
+      content: t.libelle
+        + (t.pratique === null && t.pratiqueVerdict === undefined ? '' : ''),
+      colSpan: 2,
+      styles: { fillColor: BFS.grisClair, fontStyle: 'bold', textColor: BFS.noir },
+    }]);
+    if (t.pratique === null) {
+      // Cas formateur externe (pas de détail) ou pratique pas encore réalisée
+      const texte = t.pratiqueVerdict === true ? 'Validée'
+        : t.pratiqueVerdict === false ? 'Non validée' : 'En attente';
+      const couleur = t.pratiqueVerdict === true ? BFS.vert
+        : t.pratiqueVerdict === false ? BFS.rouge : BFS.gris;
+      corpsPratique.push(['—', { content: texte, styles: { textColor: couleur, fontStyle: 'bold', halign: 'right' } }]);
+    } else if (!t.pratique.length) {
+      corpsPratique.push([{ content: 'Aucune évaluation enregistrée', colSpan: 2,
+        styles: { textColor: BFS.gris, fontStyle: 'italic' } }]);
+    } else {
+      t.pratique.forEach(item => {
+        corpsPratique.push([item.libelle,
+          { content: `${item.note} — ${NOTE_LIBELLE[item.note]}`,
+            styles: { textColor: NOTE_COULEUR[item.note], fontStyle: 'bold', halign: 'right' } }]);
+      });
+    }
+  });
+  doc.autoTable({
+    startY: y, margin: { left: marge, right: marge }, theme: 'grid',
+    styles: { fontSize: 8, cellPadding: 1.8, valign: 'middle' },
+    headStyles: { fillColor: BFS.jaune, textColor: BFS.noir, fontStyle: 'bold' },
+    columnStyles: { 0: { cellWidth: largeurUtile * 0.7 }, 1: { cellWidth: largeurUtile * 0.3 } },
+    head: [[
+      { content: 'TEST PRATIQUE', styles: { halign: 'left' } },
+      { content: 'A sans erreur · B mineure · C majeure · D grave', styles: { halign: 'right', fontSize: 6.5 } },
+    ]],
+    body: corpsPratique,
+  });
+  y = doc.lastAutoTable.finalY + 4;
+
+  const titresAvecPreconisation = titresData.filter(t => t.preconisation);
+  if (titresAvecPreconisation.length) {
+    doc.autoTable({
+      startY: y, margin: { left: marge, right: marge }, theme: 'grid',
+      styles: { fontSize: 8, cellPadding: 2.2, valign: 'top' },
+      headStyles: { fillColor: BFS.rouge, textColor: [255, 255, 255], fontStyle: 'bold' },
+      columnStyles: { 0: { cellWidth: largeurUtile * 0.25, fontStyle: 'bold', textColor: BFS.rouge },
+        1: { cellWidth: largeurUtile * 0.75 } },
+      head: [['PRÉCONISATION(S) DU FORMATEUR', '']],
+      body: titresAvecPreconisation.map(t => [t.libelle, t.preconisation]),
+    });
+    y = doc.lastAutoTable.finalY + 4;
+  }
+
+  // Bandeau final : nombre de titres validés (théorie ET pratique) sur le total.
+  const valides = titresData.filter(t => t.theorie?.ok && t.pratiqueVerdict === true).length;
+  const total = titresData.length;
+  const [couleurBandeau, texteBandeau] = valides === total
+    ? [BFS.vert, `${valides}/${total} TITRE(S) VALIDÉ(S)`]
+    : valides === 0
+      ? [BFS.rouge, 'AUCUN TITRE VALIDÉ']
+      : [[201, 122, 22], `${valides}/${total} TITRE(S) VALIDÉ(S) — VOIR PRÉCONISATION(S) CI-DESSUS`];
+  doc.setFillColor(...couleurBandeau);
+  doc.rect(marge, y, largeurUtile, 12, 'F');
+  doc.setTextColor(255, 255, 255).setFont('helvetica', 'bold').setFontSize(11);
+  doc.text(texteBandeau, largeur / 2, y + 7.5, { align: 'center' });
+
+  const nomFichier = `${st.nom}_${st.prenom}_preuve_examen.pdf`.replace(/\s+/g, '_');
+  return { doc, nomFichier, stagiaire: st };
+}
+
+async function genererPreuveExamenPdf(stagiaireId, { sauvegarder = true } = {}) {
+  const { doc, nomFichier } = await construireDocPreuveExamen(stagiaireId);
+  if (sauvegarder) {
+    doc.save(nomFichier);
+    toast('Preuve d\'examen générée');
+  }
+  return { doc, nomFichier };
+}
+
 async function genererPvSession() {
   const { data } = await sb.from('v_suivi_session').select('*').eq('session_id', S.session.id);
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });

@@ -288,6 +288,8 @@ async function rendreDetailSession(zone) {
         <button onclick="modeleExcelStagiaires()" title="Télécharger un modèle Excel">⬇ Modèle Excel</button>
         <label class="bouton-fichier" title="Importer une liste de stagiaires">⬆ Importer Excel
           <input type="file" accept=".xlsx,.xls,.csv" hidden onchange="importerStagiairesExcel(this)"></label>
+        <button title="Envoie l'avis d'habilitation + la preuve d'examen de chaque stagiaire ayant un titre au secrétariat"
+          onclick="envoyerSecretariat()">✉️ Envoi secrétariat</button>
         <button class="principal" onclick="nouveauStagiaire()">+ Ajouter</button>
       </div>
     </div>
@@ -420,6 +422,7 @@ function ligneStagiaire(st, suivi, resultatsSymboles) {
       <button class="icone" title="Évaluation pratique" onclick="ouvrirPratique('${st.id}')">🔧</button>
       <button class="icone" title="Voir la copie corrigée" onclick="voirCopie('${st.id}')">📄</button>
       <button class="icone" title="Générer le titre d'habilitation (PDF)" onclick="genererTitrePdf('${st.id}')">🏅</button>
+      <button class="icone" title="Télécharger la preuve d'examen (PDF)" onclick="genererPreuveExamenPdf('${st.id}')">🧾</button>
       <button class="icone" title="Saisir un résultat de formateur externe (sans QCM Habelec)"
         onclick="saisirResultatExterne('${st.id}')">📋${st.evaluation_externe ? ' ✓' : ''}</button>
       <button class="icone" title="Préconisation du formateur en cas d'échec (affichée sur l'avis)"
@@ -637,6 +640,98 @@ async function genererTousLesQcm() {
 }
 
 /* ---------------------- fiche stagiaire ---------------------------- */
+/* ---------- Envoi secrétariat : avis + preuve d'examen par email --------
+ * Demande de Jeremy (2026-08-28) : un bouton sur le tableau de session
+ * envoie, à la boîte mail dédiée du secrétariat (Lesli), l'avis
+ * d'habilitation ET la preuve d'examen de chaque stagiaire ayant déjà un
+ * titre généré — les PDF sont (re)construits ici même (jsPDF, mêmes
+ * fonctions que les téléchargements individuels) puis transmis en base64 à
+ * l'Edge Function habelec-envoyer-secretariat, qui se charge de l'envoi
+ * SMTP (Gmail dédié). Convention de nommage demandée : chaque fichier
+ * commence par le NOM du stagiaire, pour un tri alphabétique automatique
+ * dans la boîte mail. */
+async function envoyerSecretariat() {
+  const s = S.session;
+  const { data: stagiaires } = await sb.from('stagiaires')
+    .select('id, nom, prenom').eq('session_id', s.id).order('nom');
+  const ids = (stagiaires || []).map(st => st.id);
+  if (!ids.length) return toast('Aucun stagiaire dans cette session', 'erreur');
+
+  const { data: titres } = await sb.from('titres_habilitation')
+    .select('stagiaire_id').in('stagiaire_id', ids);
+  const idsAvecTitre = new Set((titres || []).map(t => t.stagiaire_id));
+  const eligibles = stagiaires.filter(st => idsAvecTitre.has(st.id));
+  if (!eligibles.length) {
+    return toast("Aucun stagiaire n'a de titre généré pour l'instant — génère les titres (🏅) "
+      + 'avant l\'envoi au secrétariat.', 'erreur', 7000);
+  }
+
+  ouvrirModale('Envoi secrétariat', `
+    <p class="aide">Envoie à jour l'avis d'habilitation + la preuve d'examen de chaque stagiaire
+      coché ci-dessous, dans un seul email au secrétariat.
+      Objet : <b>Habilitation électrique — ${esc(s.numero_session_galaxy || '—')}</b></p>
+    <form id="form-envoi-secretariat" class="formulaire">
+      <fieldset><legend>Stagiaires (${eligibles.length} avec titre généré)</legend>
+        ${eligibles.map(st => `<label class="case">
+          <input type="checkbox" name="stagiaire" value="${st.id}" checked> ${esc(st.nom)} ${esc(st.prenom)}</label>`).join('')}
+      </fieldset>
+      <div class="pied-modale">
+        <button type="button" onclick="fermerModale()">Annuler</button>
+        <button type="submit" class="principal">Envoyer</button>
+      </div>
+    </form>`);
+
+  $('#form-envoi-secretariat').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const idsChoisis = $$('#form-envoi-secretariat input[name=stagiaire]:checked').map(i => i.value);
+    if (!idsChoisis.length) return toast('Coche au moins un stagiaire', 'erreur');
+
+    fermerModale();
+    toast(`Préparation de ${idsChoisis.length} dossier(s)…`);
+
+    const piecesJointes = [];
+    const echecs = [];
+    for (const id of idsChoisis) {
+      try {
+        const avis = await genererTitrePdf(id, { sauvegarder: false });
+        if (!avis?.doc) { echecs.push(id); continue; }
+        const preuve = await genererPreuveExamenPdf(id, { sauvegarder: false });
+        piecesJointes.push(
+          { nom: avis.nomFichier, base64: avis.doc.output('datauristring').split(',')[1] },
+          { nom: preuve.nomFichier, base64: preuve.doc.output('datauristring').split(',')[1] },
+        );
+      } catch (e) {
+        DEBUG.erreur('envoyerSecretariat — génération PDF', e.message);
+        echecs.push(id);
+      }
+    }
+    if (!piecesJointes.length) {
+      return toast('Aucun document généré — envoi annulé (voir le journal de debug)', 'erreur');
+    }
+
+    const nomsInclus = eligibles.filter(st => idsChoisis.includes(st.id) && !echecs.includes(st.id))
+      .map(st => `${st.nom} ${st.prenom}`);
+    const objet = `Habilitation électrique — ${s.numero_session_galaxy || '—'}`;
+    const corps = `Bonjour,\n\nCi-joint l'avis d'habilitation et la preuve d'examen pour :\n`
+      + nomsInclus.map(n => `  - ${n}`).join('\n')
+      + `\n\nSession : ${s.intitule || ''} (n° Galaxy ${s.numero_session_galaxy || '—'})`
+      + (echecs.length ? `\n\n${echecs.length} stagiaire(s) n'a/ont pas pu être inclus (erreur de génération).` : '')
+      + '\n\n— Message généré automatiquement par Habelec.';
+
+    try {
+      const { data, error } = await sb.functions.invoke('habelec-envoyer-secretariat', {
+        body: { objet, corps, pieces_jointes: piecesJointes },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      toast(`Envoyé au secrétariat (${piecesJointes.length} fichier(s))`);
+    } catch (e) {
+      erreurSupabase('Envoi au secrétariat', e);
+    }
+  });
+}
+
+
 async function nouveauStagiaire() { await editerStagiaire(null); }
 
 async function editerStagiaire(id) {
@@ -658,6 +753,13 @@ async function editerStagiaire(id) {
         <label>Fonction <input name="fonction" value="${esc(st.fonction)}"></label>
         <label>Affectation <input name="affectation" value="${esc(st.affectation)}"></label>
       </div>
+      <label>Entreprise (employeur du stagiaire)
+        <input name="entreprise" value="${esc(st.entreprise || '')}"
+          placeholder="Ex : Entreprise Client SARL — jamais BFS, l'organisme de formation">
+      </label>
+      <p class="aide">Utilisée sur l'avis et le titre d'habilitation (volet « L'EMPLOYEUR »). Peut
+        aussi être saisie par le stagiaire lui-même à la connexion au QCM (dans ce cas elle écrase
+        cette valeur) — et est purgée à la clôture de la session.</p>
       <fieldset><legend>Domaines de tension</legend>
         ${['TBT', 'BT', 'HTA', 'HTB'].map(d => `<label class="case">
           <input type="checkbox" name="domaine" value="${d}"
@@ -695,6 +797,7 @@ async function editerStagiaire(id) {
       prenom: f.prenom.value.trim(),
       fonction: f.fonction.value.trim(),
       affectation: f.affectation.value.trim(),
+      entreprise: f.entreprise.value.trim(),
       domaines: $$('#form-stagiaire input[name=domaine]:checked').map(i => i.value),
     };
     const symboles = $$('#form-stagiaire input[name=symbole]:checked').map(i => i.value);
