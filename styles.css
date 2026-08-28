@@ -214,6 +214,10 @@ label.case input { width: auto; margin: 0; accent-color: var(--jaune); }
 .consignes-msp p, .consignes-msp ul { margin: 0 0 4px; font-size: 14px; }
 .consignes-msp ul { padding-left: 18px; }
 
+/* Résultat externe (2026-08-28) : repère visuel rapide sur le titre coché. */
+.titre-externe-rouge { color: var(--rouge); font-weight: 700; }
+.titre-externe-vert { color: var(--vert); font-weight: 700; }
+
 
 /* ------------------------- copie corrigée -------------------------- */
 .bilan { padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 15px; }

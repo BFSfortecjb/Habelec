@@ -435,6 +435,18 @@ function ligneStagiaire(st, suivi, resultatsSymboles) {
  * pour ce stagiaire, juste le résultat final. habelec.enregistrer_evaluation_externe
  * écrit directement dans resultats_symbole ; "🏅 Générer le titre" fonctionne
  * ensuite sans aucune autre modification. */
+// Colore le libellé d'un titre dans le formulaire "Résultat externe" (2026-08-28,
+// demande de Jeremy) : rouge dès que le titre est coché (visé), vert si en plus
+// la pratique est validée pour ce titre — repère visuel rapide, aucune incidence
+// sur les données enregistrées (toujours lues depuis les checkboxes elles-mêmes).
+function majCouleurTitreExterne(code) {
+  const lib = document.getElementById(`lib-${code}`);
+  if (!lib) return;
+  const vise = document.querySelector(`input[name=symbole][value="${code}"]`)?.checked;
+  const pratiqueValidee = document.getElementById(`prat-${code}`)?.checked;
+  lib.className = !vise ? '' : (pratiqueValidee ? 'titre-externe-vert' : 'titre-externe-rouge');
+}
+
 async function saisirResultatExterne(id) {
   const { data: st, error } = await sb.from('stagiaires')
     .select('*, stagiaire_symboles(symbole_code)').eq('id', id).single();
@@ -452,9 +464,11 @@ async function saisirResultatExterne(id) {
   S.referentiel.symboles.forEach(sy => (parRole[sy.role] ||= []).push(sy));
 
   ouvrirModale(`Résultat externe — ${st.nom} ${st.prenom}`, `
-    <p class="aide">À utiliser uniquement pour un résultat fourni par un formateur/organisme
-      extérieur à BFS (son propre système de test théorique). Remplace directement le résultat
+    <p class="aide">À utiliser uniquement pour un résultat fourni par un <b style="color:var(--rouge)">formateur/organisme
+      extérieur à BFS</b> (son propre système de test théorique). Remplace directement le résultat
       du stagiaire, sans passer par le QCM ou la pratique Habelec.</p>
+    <p class="aide">Coche « pratique validée » uniquement sur les titres réellement validés en
+      pratique : non coché = non validé.</p>
     <form id="form-resultat-externe" class="formulaire">
       <label>Nom du formateur externe
         <input name="formateur_externe" value="${esc(ev.formateur || '')}" required></label>
@@ -464,11 +478,14 @@ async function saisirResultatExterne(id) {
             ${liste.map(sy => `<label class="case">
               <input type="checkbox" name="symbole" value="${sy.code}"
                 ${symbolesVises.includes(sy.code) ? 'checked' : ''}
-                onchange="document.getElementById('prat-${sy.code}').disabled = !this.checked"> ${esc(sy.libelle)}
+                onchange="document.getElementById('prat-${sy.code}').disabled = !this.checked; majCouleurTitreExterne('${sy.code}')">
+              <span id="lib-${sy.code}" class="${symbolesVises.includes(sy.code)
+                ? (symbolesValidesPratique.includes(sy.code) ? 'titre-externe-vert' : 'titre-externe-rouge') : ''}">${esc(sy.libelle)}</span>
               <label class="case" style="margin-left:8px">
                 <input type="checkbox" id="prat-${sy.code}" name="pratique" value="${sy.code}"
                   ${!symbolesVises.includes(sy.code) ? 'disabled' : ''}
-                  ${symbolesValidesPratique.includes(sy.code) ? 'checked' : ''}> validé en pratique</label>
+                  ${symbolesValidesPratique.includes(sy.code) ? 'checked' : ''}
+                  onchange="majCouleurTitreExterne('${sy.code}')"> pratique validé</label>
             </label>`).join('')}
           </div>`).join('')}
       </fieldset>
