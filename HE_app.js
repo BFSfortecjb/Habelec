@@ -858,6 +858,20 @@ async function voirCopie(stagiaireId) {
     .select('*, questions(numero, theme_code, symboles_cibles, enonce, explication, image_url, question_reponses(id, libelle, correcte)), reponses_stagiaire(reponses_ids, correcte)')
     .eq('epreuve_id', ep.id).order('position');
 
+  // Préconisation obligatoire sur un titre en échec (2026-08-28, demande de
+  // Jeremy) : demandée ici, au moment où le formateur valide la copie
+  // corrigée — pas moyen de fermer cet écran sans l'avoir saisie pour
+  // chaque titre non validé en théorie. Préremplie si déjà saisie
+  // auparavant (ex. depuis "✏️" sur l'écran Session).
+  const [{ data: stPourPrecon }, { data: resultatsPourPrecon }] = ep.statut === 'corrigee' || ep.statut === 'terminee'
+    ? await Promise.all([
+        sb.from('stagiaires').select('id, stagiaire_symboles(symbole_code)').eq('id', stagiaireId).single(),
+        sb.from('resultats_symbole').select('symbole_code, preconisation').eq('stagiaire_id', stagiaireId),
+      ])
+    : [{ data: null }, { data: null }];
+  const symbolesStagiairePourPrecon = (stPourPrecon?.stagiaire_symboles || []).map(x => x.symbole_code);
+  const preconisationParSymbole = Object.fromEntries((resultatsPourPrecon || []).map(r => [r.symbole_code, r.preconisation]));
+
   // Détail par titre visé : le verdict global ci-dessus agrège tous les titres,
   // mais un titre peut échouer seul sans invalider les autres (tronc commun vs
   // thème propre à un titre — voir theorie_gabarit_ok côté SQL). On rejoue le
@@ -891,6 +905,26 @@ async function voirCopie(stagiaireId) {
           ${ok === true ? '✔ validé' : ok === false ? '✘ non validé' : 'en attente'}</li>`;
       }).join('')}</ul>
     </div>` : ''}
+    ${(() => {
+      // Titres en échec théorique (verdictsParTitre[g] === false) : préconisation
+      // obligatoire avant de pouvoir fermer cette copie. On regroupe par gabarit
+      // (comme la liste ci-dessus) mais on écrit le même texte sur chaque symbole
+      // visé rattaché à ce gabarit (c'est là que preconisation est stockée).
+      const gabaritsEnEchec = gabaritsVises.filter(g => verdictsParTitre[g] === false);
+      if (!gabaritsEnEchec.length) return '';
+      const mapping = Object.fromEntries(gabaritsEnEchec.map(g => [g,
+        symbolesStagiairePourPrecon.filter(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g))]));
+      return `<div class="detail-titres precon-requise" id="precon-obligatoire" data-mapping='${esc(JSON.stringify(mapping))}'>
+        <b>Préconisation (obligatoire pour valider un titre en échec)</b>
+        <p class="aide">Ce texte s'affichera sur l'avis d'habilitation, dans le tableau "Détail par titre visé".</p>
+        ${gabaritsEnEchec.map(g => {
+          const symboles = mapping[g];
+          const texteExistant = symboles.map(sym => preconisationParSymbole[sym]).find(Boolean) || '';
+          return `<label>${esc(libelleGabarit(g))}
+            <textarea id="precon-${g}" rows="2" required placeholder="Préconisation…">${esc(texteExistant)}</textarea></label>`;
+        }).join('')}
+      </div>`;
+    })()}
     <ol class="copie">${(qs || []).map(q => {
       const donnees = q.reponses_stagiaire?.reponses_ids || [];
       const juste = q.reponses_stagiaire?.correcte;
@@ -939,8 +973,40 @@ async function voirCopie(stagiaireId) {
     }).join('')}</ol>
     <div class="pied-modale">
       <button class="lien" onclick="voirJournalSession('${S.session.id}')">🗂 Journal des interventions</button>
-      <button onclick="fermerModale()">Fermer</button>
+      <button onclick="fermerCopieCorrigee('${stagiaireId}')">Fermer</button>
     </div>`);
+}
+
+// Ferme la copie corrigée, sauf s'il reste au moins une préconisation
+// obligatoire vide (2026-08-28, demande de Jeremy) : dans ce cas, bloque la
+// fermeture, signale le(s) titre(s) concerné(s) et met le focus sur le
+// premier champ à compléter, au lieu de laisser fermer silencieusement.
+async function fermerCopieCorrigee(stagiaireId) {
+  const zone = document.getElementById('precon-obligatoire');
+  if (!zone) return fermerModale();
+
+  const mapping = JSON.parse(zone.dataset.mapping || '{}');
+  for (const g of Object.keys(mapping)) {
+    const champ = document.getElementById(`precon-${g}`);
+    if (champ && !champ.value.trim()) {
+      toast(`Préconisation obligatoire pour ${libelleGabarit(g)} (titre en échec)`, 'erreur', 6000);
+      champ.focus();
+      return;
+    }
+  }
+
+  try {
+    for (const [g, symboles] of Object.entries(mapping)) {
+      const texte = document.getElementById(`precon-${g}`).value.trim();
+      for (const sym of symboles) {
+        const { error } = await sb.rpc('enregistrer_preconisation', {
+          p_stagiaire_id: stagiaireId, p_symbole_code: sym, p_texte: texte,
+        });
+        if (error) throw error;
+      }
+    }
+    fermerModale();
+  } catch (e) { erreurSupabase('Enregistrement de la préconisation', e); }
 }
 
 /* ============ 5. Import / export Excel des stagiaires =============== */

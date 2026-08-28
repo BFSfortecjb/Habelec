@@ -227,6 +227,14 @@ label.case input { width: auto; margin: 0; accent-color: var(--jaune); }
 .detail-titres b { display: block; margin-bottom: 6px; color: var(--gris); font-size: 13px; }
 .detail-titres ul { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 10px; }
 .detail-titres li { font-size: 13.5px; color: var(--gris); display: flex; align-items: center; gap: 5px; }
+
+/* Préconisation obligatoire sur un titre en échec (2026-08-28) : mise en
+   évidence dans la copie corrigée, pour que le formateur ne la manque pas. */
+.precon-requise { background: var(--rouge-fond); border: 1px solid var(--rouge); border-radius: 6px; padding: 10px 12px; }
+.precon-requise b { color: var(--rouge); }
+.precon-requise label { display: block; margin-top: 8px; font-size: 13.5px; }
+.precon-requise textarea { width: 100%; margin-top: 3px; }
+
 ol.copie { padding-left: 22px; }
 ol.copie > li { margin-bottom: 14px; }
 ol.copie > li.faux .enonce { color: var(--rouge); }

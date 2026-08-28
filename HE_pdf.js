@@ -114,6 +114,17 @@ function caseACocher(doc, x, y, cochee, taille = 3.2) {
  *     impression, sans toucher au reste du document qui sert de dossier
  *     employeur. */
 async function genererTitrePdf(stagiaireId) {
+  // Garde-fou (2026-08-28, demande de Jeremy) : impossible de générer le titre
+  // tant qu'un titre en échec (avis defavorable) n'a pas de préconisation —
+  // normalement déjà demandée en fermant la copie corrigée (voirCopie), ce
+  // filet couvre aussi les corrections faites avant l'ajout de cette règle.
+  const { data: echecsSansPreconisation } = await sb.from('resultats_symbole')
+    .select('symbole_code').eq('stagiaire_id', stagiaireId).eq('avis', 'defavorable').is('preconisation', null);
+  if (echecsSansPreconisation?.length) {
+    toast('Préconisation obligatoire pour au moins un titre en échec — à saisir avant de générer le titre', 'erreur', 6000);
+    return saisirPreconisations(stagiaireId);
+  }
+
   let titre;
   try {
     const id = await rpc('generer_titre', { p_stagiaire_id: stagiaireId });
