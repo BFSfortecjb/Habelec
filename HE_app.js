@@ -1915,7 +1915,7 @@ async function rendreOrganisme(zone) {
         </div>
         <p class="aide">Identifiants OAuth créés dans Google Cloud Console (API Drive activée,
           identifiants "Application Web", URI de redirection autorisée :
-          <code>${CONFIG.SUPABASE_URL}/functions/v1/habelec-drive-oauth-callback</code>).
+          <code>${CONFIG.SUPABASE_URL}/functions/v1/habelec-drive-oauth-callback?apikey=${CONFIG.SUPABASE_ANON_KEY}</code>).
           Enregistre d'abord ce formulaire, PUIS clique sur "Connecter Google Drive" ci-dessous en
           étant connecté avec le compte Google dédié.</p>
         <p>Statut : ${o.drive_refresh_token
@@ -1966,7 +1966,14 @@ async function rendreOrganisme(zone) {
     if (!clientId) {
       return toast('Renseigne et enregistre le Client ID Google avant de te connecter', 'erreur');
     }
-    const redirectUri = `${CONFIG.SUPABASE_URL}/functions/v1/habelec-drive-oauth-callback`;
+    // 2026-08-28 (correctif) : Supabase exige désormais une clé API (apikey)
+    // sur TOUT appel à une Edge Function, y compris cette redirection faite
+    // par Google lui-même (qui ne peut pas envoyer d'en-tête personnalisé).
+    // On l'ajoute donc directement dans l'URI de redirection, en paramètre
+    // fixe — Google la conserve telle quelle et ajoute juste code/state à la
+    // suite. Cette URI EXACTE (avec ?apikey=...) doit être celle enregistrée
+    // dans Google Cloud Console, pas la version sans apikey d'avant.
+    const redirectUri = `${CONFIG.SUPABASE_URL}/functions/v1/habelec-drive-oauth-callback?apikey=${CONFIG.SUPABASE_ANON_KEY}`;
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
