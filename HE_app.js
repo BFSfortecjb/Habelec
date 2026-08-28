@@ -1904,6 +1904,25 @@ async function rendreOrganisme(zone) {
       <fieldset><legend>Cachet de l'organisme (apposé automatiquement sur l'avis d'habilitation)</legend>
         ${widgetImage('cachet-organisme', o.cachet_data)}
       </fieldset>
+      <fieldset><legend>Sauvegarde automatique sur Google Drive (2026-08-28) — un dossier par
+        session, avec les PDF des stagiaires et un fichier session.json réimportable en cas de
+        purge</legend>
+        <div class="grille-2">
+          <label>Client ID Google <input name="drive_client_id" value="${esc(o.drive_client_id)}"
+            placeholder="xxxx.apps.googleusercontent.com"></label>
+          <label>Client Secret Google <input name="drive_client_secret" type="password"
+            placeholder="${o.drive_client_secret ? '•••••••• (déjà enregistré, laisser vide pour garder)' : ''}"></label>
+        </div>
+        <p class="aide">Identifiants OAuth créés dans Google Cloud Console (API Drive activée,
+          identifiants "Application Web", URI de redirection autorisée :
+          <code>${CONFIG.SUPABASE_URL}/functions/v1/habelec-drive-oauth-callback</code>).
+          Enregistre d'abord ce formulaire, PUIS clique sur "Connecter Google Drive" ci-dessous en
+          étant connecté avec le compte Google dédié.</p>
+        <p>Statut : ${o.drive_refresh_token
+          ? '<span style="color:var(--vert);font-weight:700">✅ Connecté</span>'
+          : '<span style="color:var(--rouge);font-weight:700">◻️ Non connecté</span>'}</p>
+        <button type="button" id="btn-connecter-drive">🔗 Connecter Google Drive</button>
+      </fieldset>
       <button class="principal" type="submit">Enregistrer</button>
     </form>`;
 
@@ -1912,7 +1931,8 @@ async function rendreOrganisme(zone) {
   $('#form-organisme').addEventListener('submit', async ev => {
     ev.preventDefault();
     const f = ev.target;
-    const { error } = await sb.from('organismes').update({
+    const clientSecretSaisi = f.drive_client_secret.value;
+    const donnees = {
       raison_sociale: f.raison_sociale.value.trim(),
       adresse: f.adresse.value.trim(),
       signataire_nom: f.signataire_nom.value.trim(),
@@ -1920,10 +1940,43 @@ async function rendreOrganisme(zone) {
       validite_annees: parseInt(f.validite_annees.value, 10) || 3,
       signature_data: lireSignature('signature-organisme'),
       cachet_data: lireImage('cachet-organisme'),
-    }).eq('id', o.id);
+      drive_client_id: f.drive_client_id.value.trim() || null,
+    };
+    // Le champ Client Secret ne réaffiche jamais la valeur enregistrée (juste
+    // un repère en placeholder) — on ne réécrit donc la colonne que si
+    // l'utilisateur a effectivement retapé quelque chose (2026-08-28).
+    if (clientSecretSaisi) {
+      donnees.drive_client_secret = clientSecretSaisi;
+    }
+    const { error } = await sb.from('organismes').update(donnees).eq('id', o.id);
     if (error) return erreurSupabase('Enregistrement', error);
     toast('Organisme enregistré');
     await chargerProfil();
+  });
+
+  // Connexion Google Drive (2026-08-28, demande de Jeremy) : ouvre l'écran de
+  // consentement Google avec le Client ID saisi juste au-dessus (donc après
+  // avoir enregistré le formulaire), state=id de l'organisme pour que
+  // l'Edge Function habelec-drive-oauth-callback sache où enregistrer le
+  // refresh_token obtenu. prompt=consent forcé pour être sûr d'obtenir un
+  // refresh_token à chaque (re)connexion, même si ce compte Google a déjà
+  // autorisé l'appli par le passé.
+  $('#btn-connecter-drive').addEventListener('click', () => {
+    const clientId = $('#form-organisme [name=drive_client_id]').value.trim();
+    if (!clientId) {
+      return toast('Renseigne et enregistre le Client ID Google avant de te connecter', 'erreur');
+    }
+    const redirectUri = `${CONFIG.SUPABASE_URL}/functions/v1/habelec-drive-oauth-callback`;
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      access_type: 'offline',
+      prompt: 'consent',
+      scope: 'https://www.googleapis.com/auth/drive.file',
+      state: o.id,
+    });
+    window.open(`https://accounts.google.com/o/oauth2/v2/auth?${params}`, '_blank');
   });
 }
 
