@@ -16,7 +16,27 @@ const { jsPDF } = window.jspdf;
 // après un déploiement, que le navigateur a bien chargé le dernier
 // HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
 // modification notable de ce fichier ; aucun effet fonctionnel.
-const PDF_VERSION = 'v15-2026-08-28';
+const PDF_VERSION = 'v16-2026-08-28';
+
+// 2026-08-28 (demande de Jeremy) : sauvegarde automatique, best-effort, des
+// PDF stagiaires sur Google Drive (compte de service configuré dans l'onglet
+// Organisme) — jamais bloquant, une erreur ici ne doit jamais empêcher la
+// génération ni le téléchargement du PDF lui-même.
+async function sauvegarderDocumentDrive(sessionId, nomFichier, doc, nomSession) {
+  if (!sessionId) return;
+  try {
+    const contenuBase64 = doc.output('datauristring').split(',')[1];
+    const { data, error } = await sb.functions.invoke('habelec-sauvegarder-drive', {
+      body: {
+        session_id: sessionId, nom_fichier: nomFichier, mime_type: 'application/pdf',
+        contenu_base64: contenuBase64, nom_session: nomSession,
+      },
+    });
+    if (error || data?.ok === false) console.warn('Sauvegarde Drive ignorée :', error || data?.erreur);
+  } catch (e) {
+    console.warn('Sauvegarde Drive ignorée :', e);
+  }
+}
 
 // 2026-08-27 (demande de Jeremy) : affiché au-dessus du trait de découpe,
 // donc dans la partie DOSSIER (conservée par l'employeur), jamais sur la
@@ -668,6 +688,7 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
   if (sauvegarder) {
     doc.save(nomFichier);
     toast('Titre et avis d\'habilitation générés');
+    sauvegarderDocumentDrive(st.session_id, nomFichier, doc, session?.intitule);
   }
   return { doc, nomFichier, stagiaire: st };
 }
@@ -901,14 +922,15 @@ async function construireDocPreuveExamen(stagiaireId) {
   doc.text(texteBandeau, largeur / 2, y + 7.5, { align: 'center' });
 
   const nomFichier = `${st.nom}_${st.prenom}_preuve_examen.pdf`.replace(/\s+/g, '_');
-  return { doc, nomFichier, stagiaire: st };
+  return { doc, nomFichier, stagiaire: st, session };
 }
 
 async function genererPreuveExamenPdf(stagiaireId, { sauvegarder = true } = {}) {
-  const { doc, nomFichier } = await construireDocPreuveExamen(stagiaireId);
+  const { doc, nomFichier, stagiaire, session } = await construireDocPreuveExamen(stagiaireId);
   if (sauvegarder) {
     doc.save(nomFichier);
     toast('Preuve d\'examen générée');
+    sauvegarderDocumentDrive(stagiaire?.session_id, nomFichier, doc, session?.intitule);
   }
   return { doc, nomFichier };
 }

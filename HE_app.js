@@ -598,11 +598,47 @@ async function basculerOuverture() {
 
 /** Purge les infos personnelles des stagiaires (sauf nom/prénom). Irréversible :
  *  refusé côté base tant qu'un avis est encore en attente pour un stagiaire. */
+// 2026-08-28 (demande de Jeremy) : snapshot JSON complet de la session,
+// envoyé sur Drive AVANT la purge des infos personnelles faite par
+// cloturer_session() côté base — pensé pour être réimportable après une
+// purge de l'appli. Best-effort, jamais bloquant sur la clôture elle-même.
+async function sauvegarderSessionJsonDrive(sessionId) {
+  try {
+    const { data: session } = await sb.from('sessions_formation').select('*').eq('id', sessionId).single();
+    const { data: stagiaires } = await sb.from('stagiaires')
+      .select('*, stagiaire_symboles(symbole_code)').eq('session_id', sessionId);
+    const stagiaireIds = (stagiaires || []).map(s => s.id);
+    const idsOuVide = stagiaireIds.length ? stagiaireIds : ['00000000-0000-0000-0000-000000000000'];
+    const [{ data: resultats }, { data: epreuves }, { data: titres }] = await Promise.all([
+      sb.from('resultats_symbole').select('*').in('stagiaire_id', idsOuVide),
+      sb.from('epreuves_theoriques').select('*').in('stagiaire_id', idsOuVide),
+      sb.from('titres_habilitation').select('*').in('stagiaire_id', idsOuVide),
+    ]);
+    const snapshot = {
+      version_export: 1,
+      exporte_le: new Date().toISOString(),
+      session, stagiaires,
+      resultats_symbole: resultats, epreuves_theoriques: epreuves, titres_habilitation: titres,
+    };
+    const contenuBase64 = btoa(unescape(encodeURIComponent(JSON.stringify(snapshot, null, 2))));
+    const { data, error } = await sb.functions.invoke('habelec-sauvegarder-drive', {
+      body: {
+        session_id: sessionId, nom_fichier: 'session.json', mime_type: 'application/json',
+        contenu_base64: contenuBase64, nom_session: session?.intitule,
+      },
+    });
+    if (error || data?.ok === false) console.warn('Sauvegarde Drive (session.json) ignorée :', error || data?.erreur);
+  } catch (e) {
+    console.warn('Sauvegarde Drive (session.json) ignorée :', e);
+  }
+}
+
 async function cloturerSession() {
   if (!confirmer('Clôturer définitivement cette session ?\n'
     + 'Toutes les infos personnelles des stagiaires (date de naissance, entreprise, '
     + 'coordonnées...) seront supprimées, sauf nom et prénom. Action irréversible.')) return;
   try {
+    await sauvegarderSessionJsonDrive(S.session.id);
     await rpc('cloturer_session', { p_session_id: S.session.id });
     toast('Session clôturée');
     await ouvrirSession(S.session.id);
@@ -1884,6 +1920,13 @@ async function enregistrerTitre(code) {
   await chargerReferentiel();
 }
 
+// 2026-08-28 (compte de service Drive) : lit juste l'adresse email du
+// compte de service dans la clé JSON collée, pour affichage dans l'onglet
+// Organisme (aide Jeremy à savoir avec quelle adresse partager le dossier).
+function extraireEmailCompteService(json) {
+  try { return JSON.parse(json).client_email || ''; } catch { return ''; }
+}
+
 async function rendreOrganisme(zone) {
   const o = S.organisme || {};
   zone.innerHTML = `
@@ -1904,24 +1947,24 @@ async function rendreOrganisme(zone) {
       <fieldset><legend>Cachet de l'organisme (apposé automatiquement sur l'avis d'habilitation)</legend>
         ${widgetImage('cachet-organisme', o.cachet_data)}
       </fieldset>
-      <fieldset><legend>Sauvegarde automatique sur Google Drive (2026-08-28) — un dossier par
-        session, avec les PDF des stagiaires et un fichier session.json réimportable en cas de
-        purge</legend>
-        <div class="grille-2">
-          <label>Client ID Google <input name="drive_client_id" value="${esc(o.drive_client_id)}"
-            placeholder="xxxx.apps.googleusercontent.com"></label>
-          <label>Client Secret Google <input name="drive_client_secret" type="password"
-            placeholder="${o.drive_client_secret ? '•••••••• (déjà enregistré, laisser vide pour garder)' : ''}"></label>
-        </div>
-        <p class="aide">Identifiants OAuth créés dans Google Cloud Console (API Drive activée,
-          identifiants "Application Web", URI de redirection autorisée :
-          <code>${CONFIG.SUPABASE_URL}/functions/v1/habelec-drive-oauth-callback?apikey=${CONFIG.SUPABASE_ANON_KEY}</code>).
-          Enregistre d'abord ce formulaire, PUIS clique sur "Connecter Google Drive" ci-dessous en
-          étant connecté avec le compte Google dédié.</p>
-        <p>Statut : ${o.drive_refresh_token
-          ? '<span style="color:var(--vert);font-weight:700">✅ Connecté</span>'
-          : '<span style="color:var(--rouge);font-weight:700">◻️ Non connecté</span>'}</p>
-        <button type="button" id="btn-connecter-drive">🔗 Connecter Google Drive</button>
+      <fieldset><legend>Sauvegarde automatique sur Google Drive (compte de service) — un
+        dossier par session, avec les PDF des stagiaires et un fichier session.json
+        réimportable en cas de purge</legend>
+        <label>Clé JSON du compte de service Google
+          <textarea name="drive_service_account_json" rows="3" placeholder="${o.drive_service_account_json ? '•••••••• (déjà enregistrée, laisser vide pour garder)' : 'Colle ici tout le contenu du fichier JSON téléchargé'}"></textarea>
+        </label>
+        <label>ID du dossier Drive racine
+          <input name="drive_dossier_racine_id" value="${esc(o.drive_dossier_racine_id)}"
+            placeholder="ex : 1AbCdEfGhIjKlmnOpQrSt (dans l'URL du dossier, après /folders/)"></label>
+        <p class="aide">1. Dans <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank">Google Cloud Console → Comptes de service</a>,
+          crée un compte de service, génère une clé JSON et colle tout son contenu ci-dessus.
+          2. Crée un dossier dans ton Google Drive, clique "Partager" et ajoute l'adresse email
+          du compte de service (visible dans le fichier JSON, champ "client_email") en Éditeur.
+          3. Colle l'ID de ce dossier ci-dessus (dans son URL, après /folders/). Pas d'écran de
+          consentement à valider : ça fonctionne dès l'enregistrement de ce formulaire.</p>
+        <p>Statut : ${o.drive_service_account_json
+          ? '<span style="color:var(--vert);font-weight:700">✅ Configuré</span>' + (extraireEmailCompteService(o.drive_service_account_json) ? ` — compte de service : <code>${esc(extraireEmailCompteService(o.drive_service_account_json))}</code>` : '')
+          : '<span style="color:var(--rouge);font-weight:700">◻️ Non configuré</span>'}</p>
       </fieldset>
       <button class="principal" type="submit">Enregistrer</button>
     </form>`;
@@ -1931,7 +1974,7 @@ async function rendreOrganisme(zone) {
   $('#form-organisme').addEventListener('submit', async ev => {
     ev.preventDefault();
     const f = ev.target;
-    const clientSecretSaisi = f.drive_client_secret.value;
+    const driveJsonSaisi = f.drive_service_account_json.value.trim();
     const donnees = {
       raison_sociale: f.raison_sociale.value.trim(),
       adresse: f.adresse.value.trim(),
@@ -1940,50 +1983,18 @@ async function rendreOrganisme(zone) {
       validite_annees: parseInt(f.validite_annees.value, 10) || 3,
       signature_data: lireSignature('signature-organisme'),
       cachet_data: lireImage('cachet-organisme'),
-      drive_client_id: f.drive_client_id.value.trim() || null,
+      drive_dossier_racine_id: f.drive_dossier_racine_id.value.trim() || null,
     };
-    // Le champ Client Secret ne réaffiche jamais la valeur enregistrée (juste
-    // un repère en placeholder) — on ne réécrit donc la colonne que si
-    // l'utilisateur a effectivement retapé quelque chose (2026-08-28).
-    if (clientSecretSaisi) {
-      donnees.drive_client_secret = clientSecretSaisi;
+    // La clé JSON ne se réaffiche jamais (juste un repère en placeholder) —
+    // on ne réécrit donc la colonne que si l'utilisateur a effectivement
+    // recollé quelque chose (2026-08-28).
+    if (driveJsonSaisi) {
+      donnees.drive_service_account_json = driveJsonSaisi;
     }
     const { error } = await sb.from('organismes').update(donnees).eq('id', o.id);
     if (error) return erreurSupabase('Enregistrement', error);
     toast('Organisme enregistré');
     await chargerProfil();
-  });
-
-  // Connexion Google Drive (2026-08-28, demande de Jeremy) : ouvre l'écran de
-  // consentement Google avec le Client ID saisi juste au-dessus (donc après
-  // avoir enregistré le formulaire), state=id de l'organisme pour que
-  // l'Edge Function habelec-drive-oauth-callback sache où enregistrer le
-  // refresh_token obtenu. prompt=consent forcé pour être sûr d'obtenir un
-  // refresh_token à chaque (re)connexion, même si ce compte Google a déjà
-  // autorisé l'appli par le passé.
-  $('#btn-connecter-drive').addEventListener('click', () => {
-    const clientId = $('#form-organisme [name=drive_client_id]').value.trim();
-    if (!clientId) {
-      return toast('Renseigne et enregistre le Client ID Google avant de te connecter', 'erreur');
-    }
-    // 2026-08-28 (correctif) : Supabase exige désormais une clé API (apikey)
-    // sur TOUT appel à une Edge Function, y compris cette redirection faite
-    // par Google lui-même (qui ne peut pas envoyer d'en-tête personnalisé).
-    // On l'ajoute donc directement dans l'URI de redirection, en paramètre
-    // fixe — Google la conserve telle quelle et ajoute juste code/state à la
-    // suite. Cette URI EXACTE (avec ?apikey=...) doit être celle enregistrée
-    // dans Google Cloud Console, pas la version sans apikey d'avant.
-    const redirectUri = `${CONFIG.SUPABASE_URL}/functions/v1/habelec-drive-oauth-callback?apikey=${CONFIG.SUPABASE_ANON_KEY}`;
-    const params = new URLSearchParams({
-      client_id: clientId,
-      redirect_uri: redirectUri,
-      response_type: 'code',
-      access_type: 'offline',
-      prompt: 'consent',
-      scope: 'https://www.googleapis.com/auth/drive.file',
-      state: o.id,
-    });
-    window.open(`https://accounts.google.com/o/oauth2/v2/auth?${params}`, '_blank');
   });
 }
 
