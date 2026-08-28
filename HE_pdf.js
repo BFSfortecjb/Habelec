@@ -137,10 +137,15 @@ async function genererTitrePdf(stagiaireId) {
   // pour D.3.1.11) alors qu'un seul des deux a été visé. Éviter l'incohérence
   // avec le tableau Annexe C du titre lui-même, qui ne liste que le symbole réel.
   const symbolesStagiaire = (st.stagiaire_symboles || []).map(x => x.symbole_code);
-  const [{ data: session }, { data: ep }] = await Promise.all([
+  const [{ data: session }, { data: ep }, { data: resultatsSymbole }] = await Promise.all([
     sb.from('sessions_formation').select('*').eq('id', st.session_id).single(),
     sb.from('epreuves_theoriques').select('*').eq('stagiaire_id', stagiaireId).maybeSingle(),
+    // Préconisations du formateur (2026-08-28, demande de Jeremy) : saisies à la main,
+    // affichées dans "Détail par titre visé" sur les lignes en échec — voir plus bas.
+    sb.from('resultats_symbole').select('symbole_code, preconisation').eq('stagiaire_id', stagiaireId),
   ]);
+  const preconisationParSymbole = Object.fromEntries(
+    (resultatsSymbole || []).filter(r => r.preconisation).map(r => [r.symbole_code, r.preconisation]));
   const org = S.organisme || {};
   const c = titre.contenu || {};
   const lignes = c.lignes || {};
@@ -266,15 +271,28 @@ async function genererTitrePdf(stagiaireId) {
   if (gabaritsVises.length) {
     doc.autoTable({
       startY: y, margin: { left: marge, right: marge }, theme: 'grid',
-      styles: { fontSize: 8, cellPadding: 1.8, valign: 'middle' },
+      styles: { fontSize: 7.5, cellPadding: 1.6, valign: 'middle' },
       headStyles: { fillColor: BFS.grisClair, textColor: BFS.noir, fontStyle: 'bold' },
+      // Colonnes resserrées (2026-08-28, demande de Jeremy) pour faire de la
+      // place à la colonne Préconisation, sans réduire "Titre visé" (les
+      // libellés peuvent être longs). L'alignement de chaque en-tête est fixé
+      // explicitement (via head ci-dessous) pour rester cohérent avec celui
+      // des valeurs de sa colonne, plutôt que de compter sur un héritage
+      // implicite de columnStyles qui ne s'appliquait pas toujours à l'en-tête.
       columnStyles: {
-        0: { cellWidth: largeurUtile * 0.28 },
-        1: { cellWidth: largeurUtile * 0.24, halign: 'center' },
-        2: { cellWidth: largeurUtile * 0.24, halign: 'center' },
-        3: { cellWidth: largeurUtile * 0.24, halign: 'center' },
+        0: { cellWidth: largeurUtile * 0.20 },
+        1: { cellWidth: largeurUtile * 0.16, halign: 'center' },
+        2: { cellWidth: largeurUtile * 0.16, halign: 'center' },
+        3: { cellWidth: largeurUtile * 0.15, halign: 'center' },
+        4: { cellWidth: largeurUtile * 0.33 },
       },
-      head: [['Titre visé', 'Résultat théorique', 'Questions fondamentales', 'Épreuve pratique']],
+      head: [[
+        { content: 'Titre visé', styles: { halign: 'left' } },
+        { content: 'Résultat théorique', styles: { halign: 'center' } },
+        { content: 'Questions fondamentales', styles: { halign: 'center' } },
+        { content: 'Épreuve pratique', styles: { halign: 'center' } },
+        { content: 'Préconisation', styles: { halign: 'left' } },
+      ]],
       body: gabaritsVises.map(g => {
         const d = detailParGabarit[g];
         const pratOk = pratiqueParGabarit[g];
@@ -314,7 +332,15 @@ async function genererTitrePdf(stagiaireId) {
           : valide ? cellule(libelleTitre, BFS.vert)
           : libelleTitre;
 
-        return [intitule, theorie, fond, pratique];
+        // Préconisation du formateur (2026-08-28, demande de Jeremy) : saisie
+        // à la main (voir "✏️" sur l'écran Session), affichée uniquement sur
+        // les titres en échec — un titre non encore en échec (pratique en
+        // attente) n'a par définition rien à préconiser pour l'instant.
+        const preconisation = echoue
+          ? (symbolesVises.map(sym => preconisationParSymbole[sym]).filter(Boolean).join(' ; ') || '—')
+          : '';
+
+        return [intitule, theorie, fond, pratique, preconisation];
       }),
     });
     y = doc.lastAutoTable.finalY + 4;
@@ -345,26 +371,36 @@ async function genererTitrePdf(stagiaireId) {
   doc.text('L\'habilitation est accordée par l\'employeur.', marge, y);
   y += 5;
 
+  // Bloc organisme en 2 colonnes (2026-08-28, demande de Jeremy) : gagne de
+  // la hauteur par rapport à l'ancien empilement à 3 lignes pleine largeur —
+  // nécessaire depuis l'ajout de la colonne Préconisation ci-dessus, qui peut
+  // pousser le tableau "Détail par titre visé" plus loin quand il y a
+  // plusieurs titres. Colonne de gauche : organisme + responsable, l'un sous
+  // l'autre ; colonne de droite : date + signature/cachet, sur toute la
+  // hauteur des deux lignes de gauche (rowSpan).
+  const largeurColOrg = largeurUtile * 0.55, largeurColSignature = largeurUtile * 0.45;
   doc.autoTable({
     startY: y, margin: { left: marge, right: marge }, theme: 'grid',
     styles: { fontSize: 8.5, cellPadding: 2.2 },
+    columnStyles: { 0: { cellWidth: largeurColOrg }, 1: { cellWidth: largeurColSignature } },
     body: [
-      [`ORGANISME DE FORMATION : ${org.raison_sociale || ''}`],
+      [`ORGANISME DE FORMATION : ${org.raison_sociale || ''}`,
+        { content: `Date : ${dateFr(new Date().toISOString())}\nSignature et cachet de l'organisme :`,
+          rowSpan: 2, styles: { minCellHeight: 30, valign: 'top' } }],
       [`RESPONSABLE : ${[org.signataire_nom, org.signataire_fonction].filter(Boolean).join(' — ')}`],
-      [{ content: `Date : ${dateFr(new Date().toISOString())}          Signature et cachet de l'organisme :`,
-         styles: { minCellHeight: 30 } }],
     ],
   });
   // Signature + cachet du représentant de l'organisme, pré-enregistrés une
   // fois depuis l'onglet Organisme (2026-08-27, demande de Jeremy) : apposés
   // automatiquement sur chaque avis. L'employeur, lui, continue de signer à
-  // la main sur le titre (voir plus bas, volet "L'EMPLOYEUR").
-  // Cachet agrandi 3x (2026-08-27, demande de Jeremy) — la ligne du tableau
-  // grandit avec lui (minCellHeight ci-dessus) pour ne rien chevaucher.
-  ajouterImageSure(doc, org.signature_data, null, largeur - marge - 55, doc.lastAutoTable.finalY - 11, 26, 9);
-  // Image sous le texte "Signature et cachet de l'organisme :" plutôt qu'à
-  // droite (2026-08-27, demande de Jeremy), alignée à gauche de la cellule.
-  ajouterImageSure(doc, org.cachet_data, null, marge + 2, doc.lastAutoTable.finalY - 21, 42, 19);
+  // la main sur le titre (voir plus bas, volet "L'EMPLOYEUR"). Positions
+  // recalculées (2026-08-28) pour la colonne de droite, plus étroite que la
+  // pleine largeur d'avant.
+  const xColSignature = marge + largeurColOrg;
+  ajouterImageSure(doc, org.signature_data, null,
+    xColSignature + largeurColSignature - 28, doc.lastAutoTable.finalY - 11, 26, 9);
+  ajouterImageSure(doc, org.cachet_data, null,
+    xColSignature + 2, doc.lastAutoTable.finalY - 21, 42, 19);
   y = doc.lastAutoTable.finalY + 4;
 
   // Marges réduites pour la carte titre (recto + verso, la bande découpée

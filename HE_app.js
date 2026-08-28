@@ -422,6 +422,8 @@ function ligneStagiaire(st, suivi, resultatsSymboles) {
       <button class="icone" title="Générer le titre d'habilitation (PDF)" onclick="genererTitrePdf('${st.id}')">🏅</button>
       <button class="icone" title="Saisir un résultat de formateur externe (sans QCM Habelec)"
         onclick="saisirResultatExterne('${st.id}')">📋${st.evaluation_externe ? ' ✓' : ''}</button>
+      <button class="icone" title="Préconisation du formateur en cas d'échec (affichée sur l'avis)"
+        onclick="saisirPreconisations('${st.id}')">✏️</button>
       <button class="icone" title="Supprimer" onclick="supprimerStagiaire('${st.id}')">🗑</button>
     </td></tr>`;
 }
@@ -524,6 +526,60 @@ async function saisirResultatExterne(id) {
       toast('Résultat externe enregistré');
       rendreDetailSession($('#contenu'));
     } catch (e) { erreurSupabase('Enregistrement du résultat externe', e); }
+  });
+}
+
+/* ---------- Préconisation du formateur en cas d'échec (2026-08-28) ------
+ * Demande de Jeremy : sur l'avis, en face d'un titre en échec (théorie et/ou
+ * pratique non validées), le formateur doit pouvoir écrire une recomman-
+ * dation libre (ex. "à représenter en pratique seule"). Enregistrée dans
+ * resultats_symbole.preconisation, colonne dédiée jamais réécrite par
+ * calculer_resultats() — voir habelec.enregistrer_preconisation(). */
+async function saisirPreconisations(id) {
+  const { data: st, error } = await sb.from('stagiaires')
+    .select('*, stagiaire_symboles(symbole_code)').eq('id', id).single();
+  if (error) return erreurSupabase('Lecture du stagiaire', error);
+  const symbolesVises = (st.stagiaire_symboles || []).map(x => x.symbole_code);
+  if (!symbolesVises.length) return toast('Aucun titre visé pour ce stagiaire', 'erreur');
+
+  const { data: resultats } = await sb.from('resultats_symbole')
+    .select('symbole_code, avis, preconisation').eq('stagiaire_id', id);
+  const parSymbole = Object.fromEntries((resultats || []).map(r => [r.symbole_code, r]));
+
+  const badgeAvis = avis => avis === 'favorable' ? '<span class="etat ok">validé</span>'
+    : avis === 'defavorable' ? '<span class="etat ko">échec</span>'
+    : '<span class="etat neutre">en attente</span>';
+
+  ouvrirModale(`Préconisations — ${st.nom} ${st.prenom}`, `
+    <p class="aide">À renseigner pour les titres en échec : ce texte s'affiche sur l'avis
+      d'habilitation, dans le tableau "Détail par titre visé".</p>
+    <form id="form-preconisations" class="formulaire">
+      ${symbolesVises.map(code => {
+        const r = parSymbole[code] || {};
+        return `<label>${esc(libelleSymbole(code))} ${badgeAvis(r.avis)}
+          <textarea name="p-${code}" rows="2" placeholder="Préconisation…">${esc(r.preconisation || '')}</textarea></label>`;
+      }).join('')}
+      <div class="pied-modale">
+        <button type="button" onclick="fermerModale()">Annuler</button>
+        <button type="submit" class="principal">Enregistrer</button>
+      </div>
+    </form>`);
+
+  $('#form-preconisations').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const f = ev.target;
+    try {
+      for (const code of symbolesVises) {
+        const { error } = await sb.rpc('enregistrer_preconisation', {
+          p_stagiaire_id: id,
+          p_symbole_code: code,
+          p_texte: f[`p-${code}`].value,
+        });
+        if (error) throw error;
+      }
+      fermerModale();
+      toast('Préconisations enregistrées');
+    } catch (e) { erreurSupabase('Enregistrement des préconisations', e); }
   });
 }
 
