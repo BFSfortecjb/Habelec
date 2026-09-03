@@ -441,3 +441,27 @@ details h4 { margin-top: 14px; font-size: 13px; color: var(--gris-doux); }
 .qr-repliable > *:not(summary) {
   margin-top: 8px;
 }
+
+
+/* 2026-09-04 : popup "plus d'actions" du tableau stagiaires */
+.liste-actions-stagiaire {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.liste-actions-stagiaire button {
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--gris-bord);
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.liste-actions-stagiaire button:hover {
+  background: #f5f5f5;
+}
+.liste-actions-stagiaire button.danger {
+  color: var(--rouge);
+  border-color: var(--rouge);
+}

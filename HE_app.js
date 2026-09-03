@@ -305,6 +305,8 @@ async function rendreDetailSession(zone) {
           <input type="file" accept=".xlsx,.xls,.csv" hidden onchange="importerStagiairesExcel(this)"></label>
         <button title="Envoie l'avis d'habilitation + la preuve d'examen de chaque stagiaire ayant un titre au secrétariat"
           onclick="envoyerSecretariat()">✉️ Envoi secrétariat</button>
+        <button title="Télécharge un ZIP avec l'avis d'habilitation + la preuve d'examen de chaque stagiaire ayant un titre"
+          onclick="telechargerZipTitres()">🗜 Télécharger ZIP</button>
         <button class="principal" onclick="nouveauStagiaire()">+ Ajouter</button>
       </div>
     </div>
@@ -435,19 +437,31 @@ function ligneStagiaire(st, suivi, resultatsSymboles) {
     <td>${(st.domaines || []).join(', ')}</td>
     <td>${theorie}</td><td>${prat}</td>
     <td class="actions">
-      <button class="icone" title="Modifier le stagiaire et ses titres" onclick="editerStagiaire('${st.id}')">✎</button>
+      <button class="icone" title="Plus d'actions (modifier, avis, documents, suppression...)"
+        onclick="ouvrirActionsStagiaire('${st.id}', '${esc(st.nom)}', '${esc(st.prenom)}', ${st.evaluation_externe ? 'true' : 'false'})">👁</button>
       <button class="icone" title="Évaluation pratique" onclick="ouvrirPratique('${st.id}')">🔧</button>
-      <button class="icone" title="Voir la copie corrigée" onclick="voirCopie('${st.id}')">📄</button>
-      <button class="icone" title="Générer le titre d'habilitation (PDF)" onclick="genererTitrePdf('${st.id}')">🏅</button>
-      <button class="icone" title="Télécharger la preuve d'examen (PDF)" onclick="genererPreuveExamenPdf('${st.id}')">🧾</button>
-      <button class="icone" title="Saisir un résultat de formateur externe (sans QCM Habelec)"
-        onclick="saisirResultatExterne('${st.id}')">📋${st.evaluation_externe ? ' ✓' : ''}</button>
-      <button class="icone" title="Préconisation du formateur en cas d'échec (affichée sur l'avis)"
-        onclick="saisirPreconisations('${st.id}')">✏️</button>
       <button class="icone" title="QCM de rattrapage : uniquement sur le(s) titre(s) en échec au premier passage"
         onclick="proposerRattrapage('${st.id}')">🔁</button>
-      <button class="icone" title="Supprimer" onclick="supprimerStagiaire('${st.id}')">🗑</button>
+      <button class="icone" title="Préconisation du formateur en cas d'échec (affichée sur l'avis)"
+        onclick="saisirPreconisations('${st.id}')">✏️</button>
     </td></tr>`;
+}
+
+/* ---------- Popup "Plus d'actions" (2026-09-04, demande de Jeremy) -----
+ * La ligne stagiaire ne garde que les 3 actions les plus fréquentes en
+ * salle (pratique, rattrapage, préconisation) — tout le reste (modifier,
+ * documents, résultat externe, suppression) part dans ce popup ouvert par
+ * l'icône œil, pour désencombrer le tableau. */
+function ouvrirActionsStagiaire(id, nom, prenom, evaluationExterne) {
+  ouvrirModale(`${nom} ${prenom}`, `
+    <div class="liste-actions-stagiaire">
+      <button onclick="fermerModale();editerStagiaire('${id}')">✎ Modifier le stagiaire et ses titres</button>
+      <button onclick="fermerModale();voirCopie('${id}')">📄 Voir la copie corrigée</button>
+      <button onclick="fermerModale();genererTitrePdf('${id}')">🏅 Générer le titre d'habilitation (PDF)</button>
+      <button onclick="fermerModale();genererPreuveExamenPdf('${id}')">🧾 Télécharger la preuve d'examen (PDF)</button>
+      <button onclick="fermerModale();saisirResultatExterne('${id}')">📋 Saisir un résultat de formateur externe${evaluationExterne ? ' ✓' : ''}</button>
+      <button class="danger" onclick="fermerModale();supprimerStagiaire('${id}')">🗑 Supprimer le stagiaire</button>
+    </div>`);
 }
 
 /* ---------- QCM de rattrapage (2026-09-04, demande de Jeremy) ----------
@@ -724,6 +738,63 @@ async function genererTousLesQcm() {
  * SMTP (Gmail dédié). Convention de nommage demandée : chaque fichier
  * commence par le NOM du stagiaire, pour un tri alphabétique automatique
  * dans la boîte mail. */
+/* ---------- ZIP global : tous les titres + toutes les preuves --------
+ * (2026-09-04, demande de Jeremy) Sur le tableau général d'une session,
+ * télécharge un seul fichier ZIP contenant l'avis d'habilitation ET la
+ * preuve d'examen de chaque stagiaire ayant un titre généré — pratique
+ * pour un archivage local rapide, sans passer par l'envoi email au
+ * secrétariat. Réutilise les mêmes générateurs PDF (sauvegarder: false)
+ * que envoyerSecretariat, juste ci-dessous. Nécessite JSZip (voir index.html).
+ */
+async function telechargerZipTitres() {
+  const s = S.session;
+  const { data: stagiaires } = await sb.from('stagiaires')
+    .select('id, nom, prenom').eq('session_id', s.id).order('nom');
+  const ids = (stagiaires || []).map(st => st.id);
+  if (!ids.length) return toast('Aucun stagiaire dans cette session', 'erreur');
+
+  const { data: titres } = await sb.from('titres_habilitation')
+    .select('stagiaire_id').in('stagiaire_id', ids);
+  const idsAvecTitre = new Set((titres || []).map(t => t.stagiaire_id));
+  const eligibles = stagiaires.filter(st => idsAvecTitre.has(st.id));
+  if (!eligibles.length) {
+    return toast("Aucun stagiaire n'a de titre généré pour l'instant — génère les titres (👁 puis 🏅) "
+      + 'avant de télécharger le ZIP.', 'erreur', 7000);
+  }
+
+  if (typeof JSZip === 'undefined') return toast('Bibliothèque ZIP indisponible (réseau ?)', 'erreur');
+
+  toast(`Préparation du ZIP pour ${eligibles.length} stagiaire(s)…`);
+  const zip = new JSZip();
+  const echecs = [];
+  for (const st of eligibles) {
+    try {
+      const avis = await genererTitrePdf(st.id, { sauvegarder: false });
+      if (!avis?.doc) { echecs.push(st); continue; }
+      const preuve = await genererPreuveExamenPdf(st.id, { sauvegarder: false });
+      zip.file(avis.nomFichier, avis.doc.output('arraybuffer'));
+      zip.file(preuve.nomFichier, preuve.doc.output('arraybuffer'));
+    } catch (e) {
+      DEBUG.erreur('telechargerZipTitres — génération PDF', e.message);
+      echecs.push(st);
+    }
+  }
+
+  const contenu = await zip.generateAsync({ type: 'blob' });
+  const lien = document.createElement('a');
+  lien.href = URL.createObjectURL(contenu);
+  lien.download = `${(s.numero_session_galaxy || s.code_acces || 'session')}-titres-preuves.zip`;
+  lien.click();
+  URL.revokeObjectURL(lien.href);
+
+  if (echecs.length) {
+    toast(`ZIP téléchargé, mais ${echecs.length} dossier(s) en échec : `
+      + echecs.map(st => `${st.nom} ${st.prenom}`).join(', '), 'erreur', 8000);
+  } else {
+    toast('ZIP téléchargé');
+  }
+}
+
 async function envoyerSecretariat() {
   const s = S.session;
   const { data: stagiaires } = await sb.from('stagiaires')
