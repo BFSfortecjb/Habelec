@@ -16,7 +16,7 @@ const { jsPDF } = window.jspdf;
 // après un déploiement, que le navigateur a bien chargé le dernier
 // HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
 // modification notable de ce fichier ; aucun effet fonctionnel.
-const PDF_VERSION = 'v18-2026-09-03';
+const PDF_VERSION = 'v19-2026-09-03';
 
 // 2026-08-28 (demande de Jeremy) : sauvegarde automatique, best-effort, des
 // PDF stagiaires sur Google Drive (compte de service configuré dans l'onglet
@@ -812,14 +812,19 @@ async function construireDocPreuveExamen(stagiaireId) {
         .filter(q => q.gabarit_code === g)
         .reduce((somme, q) => somme + (q.nb_fondamentales || 0), 0)]));
 
-    titresData = gabaritsVises.map(g => {
+    // 2026-09-03 (demande de Jeremy) : un titre décoché après coup (ex. via
+    // "Modifier le stagiaire") ne doit plus apparaître sur la preuve d'examen
+    // non plus, comme sur l'avis/titre — on ignore les gabarits qui ne
+    // correspondent plus à aucun titre actuellement coché.
+    titresData = gabaritsVises.filter(g => symbolesStagiaire
+      .some(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g))
+    ).map(g => {
       const d = detailParGabarit[g];
       const p = pratiqueParGabarit[g];
       const refFond = fondNormeParGabarit[g] || 0;
       const symbolesVises = symbolesStagiaire
         .filter(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g));
-      const libelleTitre = symbolesVises.length
-        ? symbolesVises.map(libelleSymbole).join(' / ') : libelleGabarit(g);
+      const libelleTitre = symbolesVises.map(libelleSymbole).join(' / ');
 
       // Mise en situation retenue pour le détail affiché : la plus récente
       // qui comporte au moins une évaluation notée (même principe que
