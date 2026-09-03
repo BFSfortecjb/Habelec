@@ -16,7 +16,7 @@ const { jsPDF } = window.jspdf;
 // après un déploiement, que le navigateur a bien chargé le dernier
 // HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
 // modification notable de ce fichier ; aucun effet fonctionnel.
-const PDF_VERSION = 'v17-2026-09-05';
+const PDF_VERSION = 'v18-2026-09-03';
 
 // 2026-08-28 (demande de Jeremy) : sauvegarde automatique, best-effort, des
 // PDF stagiaires sur Google Drive (compte de service configuré dans l'onglet
@@ -497,10 +497,22 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
   const domaines = (titre.domaines || []).join(', ') || '—';
   const installations = titre.ouvrages || '—';
   const indications = titre.indications || '—';
+  // 2026-09-03 (demande de Jeremy) : domaine de tension propre à chaque ligne
+  // de l'Annexe C (via symboles.domaine, agrégé côté SQL dans
+  // titre.contenu.domainesLignes) au lieu du domaine global du stagiaire
+  // appliqué partout (ex. H0 affichait TBT/BT en plus de HTA, B1V/B2V/BR
+  // affichaient HTA en plus de TBT/BT). Les titres générés avant ce correctif
+  // n'ont pas domainesLignes : on retombe alors sur l'ancien domaines global.
+  const LIBELLES_DOMAINE = { BT: 'TBT, BT', HT: 'HTA' };
+  const domainesLignes = titre.contenu?.domainesLignes || {};
   const ligneAvis = lt => {
     const symboles = (lignes[lt.code] || []).join(', ');
+    const codesDomaine = domainesLignes[lt.code];
+    const domainesLigne = (codesDomaine && codesDomaine.length)
+      ? codesDomaine.map(d => LIBELLES_DOMAINE[d] || d).join(', ')
+      : domaines;
     return [lt.libelle, symboles || '—',
-      symboles ? domaines : '—', symboles ? installations : '—', symboles ? indications : '—'];
+      symboles ? domainesLigne : '—', symboles ? installations : '—', symboles ? indications : '—'];
   };
   const nonElec = S.referentiel.lignesTitre.filter(lt => lt.section.includes('non électrique'));
   const elec = S.referentiel.lignesTitre.filter(lt => !lt.section.includes('non électrique'));
