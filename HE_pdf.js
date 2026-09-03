@@ -16,7 +16,7 @@ const { jsPDF } = window.jspdf;
 // après un déploiement, que le navigateur a bien chargé le dernier
 // HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
 // modification notable de ce fichier ; aucun effet fonctionnel.
-const PDF_VERSION = 'v23-2026-09-03';
+const PDF_VERSION = 'v24-2026-09-03';
 
 // 2026-08-28 (demande de Jeremy) : sauvegarde automatique, best-effort, des
 // PDF stagiaires sur Google Drive (compte de service configuré dans l'onglet
@@ -848,10 +848,6 @@ async function construireDocPreuveExamen(stagiaireId) {
     ]);
     const detailParGabarit = Object.fromEntries(gabaritsVises.map((g, i) => [g, detailsTheorie[i]]));
     const pratiqueParGabarit = Object.fromEntries((pratiques || []).map(p => [p.gabarit_code, p]));
-    const fondNormeParGabarit = Object.fromEntries(gabaritsVises.map(g => [g,
-      (S.referentiel?.quotas || [])
-        .filter(q => q.gabarit_code === g)
-        .reduce((somme, q) => somme + (q.nb_fondamentales || 0), 0)]));
 
     // 2026-09-03 (demande de Jeremy) : un titre décoché après coup (ex. via
     // "Modifier le stagiaire") ne doit plus apparaître sur la preuve d'examen
@@ -862,7 +858,12 @@ async function construireDocPreuveExamen(stagiaireId) {
     ).map(g => {
       const d = detailParGabarit[g];
       const p = pratiqueParGabarit[g];
-      const refFond = fondNormeParGabarit[g] || 0;
+      // 2026-09-03 (demande de Jeremy, ex. "4/2" incohérent constaté sur H0) :
+      // le dénominateur des questions fondamentales doit venir du même calcul
+      // que sur l'avis (d.fond_total, renvoyé par le RPC theorie_gabarit_detail),
+      // pas d'un recalcul séparé à partir des quotas du référentiel qui pouvait
+      // diverger (ex. tronc commun compté différemment selon les deux voies).
+      const refFond = d?.fond_total || 0;
       const symbolesVises = symbolesStagiaire
         .filter(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g));
       const libelleTitre = symbolesVises.map(libelleSymbole).join(' / ');
