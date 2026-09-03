@@ -246,6 +246,10 @@ async function rendreDetailSession(zone) {
   // Code inclus dans le lien : le QR scanné saute la saisie manuelle du code.
   const lienStagiaire = location.origin + location.pathname
     + '#stagiaire?code=' + encodeURIComponent(s.code_acces);
+  // QCM de positionnement (2026-09-03) : même code de session, autre route
+  // (#entrainement) — entraînement libre, sans impact sur le dossier.
+  const lienEntrainement = location.origin + location.pathname
+    + '#entrainement?code=' + encodeURIComponent(s.code_acces);
 
   zone.innerHTML = `
     <button class="lien" onclick="retour('sessions')">← Toutes les sessions</button>
@@ -271,6 +275,12 @@ async function rendreDetailSession(zone) {
       <div><b>QR code</b><div id="qr-passation"></div>
         <p id="qr-erreur" class="erreur-discrete" hidden></p>
         <button class="lien" onclick="telechargerQrPassation()">Télécharger l'image</button></div>
+      <div><b>QCM de positionnement (entraînement libre)</b>
+        <div id="qr-entrainement"></div>
+        <p class="aide">QR différent de l'examen : le stagiaire choisit ses titres visés et
+          s'entraîne avec les réponses affichées, sans impact sur son dossier.</p>
+        <div><code>${esc(lienEntrainement)}</code></div>
+        <button class="lien" onclick="navigator.clipboard.writeText('${esc(lienEntrainement)}');toast('Lien copié')">Copier le lien</button></div>
       <div><b>N° de session Galaxy</b><div>${esc(s.numero_session_galaxy) || '<i>non renseigné</i>'}</div>
         <button class="lien" onclick="modifierNumeroGalaxy()">Modifier</button></div>
       <div><b>Lieu de la formation</b><div>${esc(s.lieu) || '<i>non renseigné</i>'}</div>
@@ -312,6 +322,8 @@ async function rendreDetailSession(zone) {
     if (typeof QRCode === 'undefined') throw new Error('bibliothèque QRCode non chargée');
     $('#qr-passation').innerHTML = '';
     new QRCode($('#qr-passation'), { text: lienStagiaire, width: 140, height: 140 });
+    $('#qr-entrainement').innerHTML = '';
+    new QRCode($('#qr-entrainement'), { text: lienEntrainement, width: 140, height: 140 });
   } catch (e) { afficherErreurQr(e.message); }
 }
 
@@ -1947,6 +1959,13 @@ async function rendreOrganisme(zone) {
       <fieldset><legend>Cachet de l'organisme (apposé automatiquement sur l'avis d'habilitation)</legend>
         ${widgetImage('cachet-organisme', o.cachet_data)}
       </fieldset>
+      <fieldset><legend>Questions fondamentales</legend>
+        <label class="case"><input type="checkbox" name="fondamentales_actives" ${o.fondamentales_actives === false ? '' : 'checked'}>
+          Activer les questions fondamentales (échec = titre non validé, badge affiché au stagiaire pendant l'examen)</label>
+        <p class="aide">Décoche pour désactiver entièrement les questions fondamentales pour cet organisme :
+          elles ne seront plus exigées pour valider un titre, et le badge "Question fondamentale" ne
+          s'affichera plus pendant la passation. S'applique à toutes les sessions.</p>
+      </fieldset>
       <fieldset><legend>Sauvegarde automatique sur Google Drive (compte de service) — un
         dossier par session, avec les PDF des stagiaires et un fichier session.json
         réimportable en cas de purge</legend>
@@ -1984,6 +2003,7 @@ async function rendreOrganisme(zone) {
       signature_data: lireSignature('signature-organisme'),
       cachet_data: lireImage('cachet-organisme'),
       drive_dossier_racine_id: f.drive_dossier_racine_id.value.trim() || null,
+      fondamentales_actives: f.fondamentales_actives.checked,
     };
     // La clé JSON ne se réaffiche jamais (juste un repère en placeholder) —
     // on ne réécrit donc la colonne que si l'utilisateur a effectivement
