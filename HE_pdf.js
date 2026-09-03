@@ -16,7 +16,7 @@ const { jsPDF } = window.jspdf;
 // après un déploiement, que le navigateur a bien chargé le dernier
 // HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
 // modification notable de ce fichier ; aucun effet fonctionnel.
-const PDF_VERSION = 'v16-2026-08-28';
+const PDF_VERSION = 'v17-2026-09-05';
 
 // 2026-08-28 (demande de Jeremy) : sauvegarde automatique, best-effort, des
 // PDF stagiaires sur Google Drive (compte de service configuré dans l'onglet
@@ -643,7 +643,8 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
       + dateFr(titre.recycler_avant), xV1 + 3, zBas - 2.5, { maxWidth: largeurVolet - 6 });
   }
 
-  /* ---- Volet 2 : texte réglementaire AVIS ---- */
+  /* ---- Volet 2 : texte réglementaire AVIS + case "autorisations/interdictions
+   *  spéciales" à remplir à la main (2026-09-05, demande de Jeremy) ---- */
   const xc2 = xV2 + largeurVolet / 2;
   doc.setTextColor(...BFS.noir).setFont('helvetica', 'bold').setFontSize(9);
   doc.text('AVIS', xc2, zHaut + 6, { align: 'center' });
@@ -660,11 +661,34 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
     + 'La rubrique « indications supplémentaires » doit obligatoirement être remplie.',
     xV2 + 3, zHaut + 12, { maxWidth: largeurVolet - 6, lineHeightFactor: 1.25 });
 
-  /* ---- Volet 3 : logo, encadré titre, marque et téléphone du site ---- */
+  doc.setFont('helvetica', 'bold').setFontSize(7).setTextColor(...BFS.noir);
+  doc.text('AUTORISATIONS OU INTERDICTIONS SPECIALES :', xV2 + 3, zHaut + 44,
+    { maxWidth: largeurVolet - 6 });
+  doc.setDrawColor(...BFS.gris).setLineWidth(0.3);
+  const nbLignesAutorisations = 6;
+  const yLignesDebut = zHaut + 52, yLignesFin = zBas - 4;
+  for (let i = 0; i < nbLignesAutorisations; i++) {
+    const y = yLignesDebut + i * (yLignesFin - yLignesDebut) / (nbLignesAutorisations - 1);
+    doc.line(xV2 + 3, y, xV2 + largeurVolet - 3, y);
+  }
+  doc.setTextColor(...BFS.noir);
+
+  /* ---- Volet 3 : logo, marque/téléphone du site, encadré titre, champs
+   *  Nom/Prénom/Société à remplir à la main (2026-09-05, demande de Jeremy :
+   *  la marque et le téléphone du site passent AU-DESSUS de l'encadré
+   *  jaune, qui descend d'autant) ---- */
   const xc3 = xV3 + largeurVolet / 2;
   const largeurLogo = 26;
   doc.addImage(LOGO_BFS, 'PNG', xc3 - largeurLogo / 2, zHaut + 4, largeurLogo, largeurLogo * 119 / 222);
-  const yEncadre = zHaut + 4 + largeurLogo * 119 / 222 + 5;
+  const yApresLogo = zHaut + 4 + largeurLogo * 119 / 222 + 5;
+
+  doc.setFont('helvetica', 'bold').setFontSize(7.5).setTextColor(...BFS.noir);
+  doc.text(site.marque, xc3, yApresLogo, { align: 'center', maxWidth: largeurVolet - 6 });
+  doc.setFont('helvetica', 'normal').setFontSize(7).setTextColor(...BFS.gris);
+  doc.text(site.tel, xc3, yApresLogo + 5, { align: 'center' });
+  doc.setTextColor(...BFS.noir);
+
+  const yEncadre = yApresLogo + 11;
   doc.setDrawColor(...BFS.jaune).setLineWidth(0.5).rect(xV3 + 4, yEncadre, largeurVolet - 8, 16);
   doc.setTextColor(...BFS.noir).setFont('helvetica', 'bold').setFontSize(8.5);
   doc.text('TITRE D\'HABILITATION\nÉLECTRIQUE', xc3, yEncadre + 6, { align: 'center', lineHeightFactor: 1.15 });
@@ -682,10 +706,19 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
     doc.setLineWidth(0.2);
   }
 
-  doc.setFont('helvetica', 'bold').setFontSize(7.5).setTextColor(...BFS.noir);
-  doc.text(site.marque, xc3, yEncadre + 24, { align: 'center', maxWidth: largeurVolet - 6 });
-  doc.setFont('helvetica', 'normal').setFontSize(7).setTextColor(...BFS.gris);
-  doc.text(site.tel, xc3, yEncadre + 29, { align: 'center' });
+  // Champs Nom / Prénom / Société à remplir à la main (2026-09-05, demande
+  // de Jeremy) — laissés vides, comme sur le volet 1 (case "LE TITULAIRE").
+  const yChamps = yEncadre + 27;
+  doc.setFont('helvetica', 'bold').setFontSize(9).setTextColor(...BFS.noir);
+  doc.text('Nom :', xV3 + 4, yChamps);
+  doc.text('Prénom :', xV3 + 4, yChamps + 10);
+  doc.text('Société :', xV3 + 4, yChamps + 20);
+
+  doc.setFont('helvetica', 'normal').setFontSize(6.5);
+  doc.text('Cette habilitation n\'autorise pas à elle seule son titulaire à effectuer de son propre '
+    + 'chef les opérations pour lesquelles il est habilité.',
+    xc3, zBas - 8, { align: 'center', maxWidth: largeurVolet - 8, lineHeightFactor: 1.2 });
+  doc.setTextColor(...BFS.noir);
 
   // Nom de fichier commençant par le NOM du stagiaire (2026-08-28, demande de
   // Jeremy) : les pièces jointes de l'envoi secrétariat doivent se classer

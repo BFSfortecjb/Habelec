@@ -5,6 +5,14 @@
    le code affiché en salle, choisit son nom, et passe son sujet.
    Tout passe par des fonctions SQL sécurisées : les bonnes réponses ne
    descendent jamais dans le navigateur pendant l'épreuve.
+
+   2026-09-05 (demande de Jeremy) : les réponses ne sont PLUS envoyées au
+   serveur question par question pendant l'épreuve (source du problème
+   "répondu mais pas enregistré" en cas de wifi salle instable). Elles
+   sont gardées en cache LOCAL (mémoire + localStorage, pour survivre à
+   un rechargement/plantage du navigateur) au fil de l'épreuve, et
+   envoyées en une fois au clic sur "Terminer" — avec retries et blocage
+   de la fin d'épreuve tant que l'envoi n'est pas confirmé, comme avant.
    ===================================================================== */
 
 const Q = {
@@ -16,6 +24,50 @@ const Q = {
   candidats: [],   // liste renvoyée par liste_stagiaires_session, pour retrouver
                     // date_naissance/entreprise sans un second aller-retour serveur
 };
+
+/* ---------- Cache local des réponses (2026-09-05) ---------------------
+ * Clé par jeton (propre à chaque stagiaire) + épreuve, pour ne jamais
+ * mélanger le cache d'un stagiaire précédent sur un appareil partagé, ni
+ * réappliquer un cache d'une épreuve déjà terminée/regénérée. */
+function cleCacheReponses(jeton) { return `habelec-qcm-reponses-${jeton}`; }
+
+function sauvegarderCacheReponses() {
+  if (!Q.jeton || !Q.sujet) return;
+  try {
+    const reponses = {};
+    Q.sujet.questions.forEach(q => {
+      if ((q.reponse_donnee || []).length) reponses[q.id] = q.reponse_donnee;
+    });
+    localStorage.setItem(cleCacheReponses(Q.jeton), JSON.stringify({
+      epreuve_id: Q.sujet.epreuve_id, reponses,
+    }));
+  } catch (e) { DEBUG.erreur('sauvegarderCacheReponses', e.message); }
+}
+
+/** Réapplique, sur le sujet fraîchement reçu du serveur, les réponses restées en
+ *  cache local d'une session interrompue (rechargement de page, coupure réseau,
+ *  onglet fermé par erreur...). N'écrase rien côté serveur : purement local. */
+function restaurerCacheReponses() {
+  if (!Q.jeton || !Q.sujet) return;
+  try {
+    const brut = localStorage.getItem(cleCacheReponses(Q.jeton));
+    if (!brut) return;
+    const cache = JSON.parse(brut);
+    if (cache.epreuve_id !== Q.sujet.epreuve_id) {
+      // Cache d'une épreuve différente (regénérée depuis) : on l'ignore et le purge.
+      localStorage.removeItem(cleCacheReponses(Q.jeton));
+      return;
+    }
+    Q.sujet.questions.forEach(q => {
+      if (cache.reponses[q.id]) q.reponse_donnee = cache.reponses[q.id];
+    });
+  } catch (e) { DEBUG.erreur('restaurerCacheReponses', e.message); }
+}
+
+function effacerCacheReponses() {
+  if (!Q.jeton) return;
+  try { localStorage.removeItem(cleCacheReponses(Q.jeton)); } catch {}
+}
 
 async function ecranStagiaire(cible) {
   if (Q.sujet) return rendreQuestion(cible);
@@ -115,6 +167,7 @@ async function demarrerQcmSuite(jeton) {
     Q.jeton = jeton;
     Q.sujet = sujet;
     Q.index = 0;
+    restaurerCacheReponses();
     if (sujet.duree_max_min) {
       Q.finLe = Date.now() + sujet.duree_max_min * 60000;
     }
@@ -156,8 +209,8 @@ function rendreQuestion(cible) {
       <footer class="pied-passation">
         <button ${Q.index === 0 ? 'disabled' : ''} onclick="naviguerQcm(-1)">← Précédente</button>
         <div class="pastilles">${qs.map((x, i) => `
-          <button class="pastille ${i === Q.index ? 'actif' : ''} ${(x.reponse_donnee || []).length ? 'faite' : ''} ${x.enregistrement === 'erreur' ? 'erreur' : ''}"
-            title="Question ${i + 1}${x.enregistrement === 'erreur' ? ' — non enregistrée, réessaie' : ''}"
+          <button class="pastille ${i === Q.index ? 'actif' : ''} ${(x.reponse_donnee || []).length ? 'faite' : ''}"
+            title="Question ${i + 1}"
             onclick="allerQuestion(${i})">${i + 1}</button>`).join('')}</div>
         ${Q.index === qs.length - 1
           ? `<button class="principal" onclick="terminerQcm()">Terminer</button>`
@@ -165,43 +218,40 @@ function rendreQuestion(cible) {
       </footer>
     </div>`;
 
-  $$('.propositions input').forEach(i => i.addEventListener('change', enregistrerReponseCourante));
+  $$('.propositions input').forEach(i => i.addEventListener('change', enregistrerReponseLocale));
   demarrerChrono();
 }
 
-async function enregistrerReponseCourante() {
+/** 2026-09-05 : plus aucun appel réseau ici — la réponse est gardée en
+ *  mémoire (Q.sujet) ET en localStorage (survit à un rechargement de
+ *  page), et ne part vers le serveur qu'au moment de "Terminer" (voir
+ *  envoyerReponsesEtTerminer). Ça évite qu'une coupure wifi ponctuelle en
+ *  cours d'épreuve fasse perdre une réponse déjà cochée à l'écran. */
+function enregistrerReponseLocale() {
   const q = Q.sujet.questions[Q.index];
   const choix = $$('.propositions input:checked').map(i => i.value);
   q.reponse_donnee = choix;
-  // Mise à jour visuelle immédiate, enregistrement en arrière-plan
   $$('.proposition').forEach(p =>
     p.classList.toggle('choisie', p.querySelector('input').checked));
-  q.enregistrement = 'en_cours';
-  await enregistrerAvecReprise(q, choix);
-  // La pastille reflète le statut réel (faite / erreur) : on ne redessine que la barre
-  // de progression et les pastilles, sans perdre la place sur la question courante.
+  sauvegarderCacheReponses();
   rafraichirBarreEtPastilles();
 }
 
-/** Tente d'enregistrer une réponse côté serveur, avec 3 essais (courte pause entre
- *  chaque). Marque q.enregistrement = 'ok' ou 'erreur' selon le résultat final —
- *  c'est ce statut, pas seulement la présence d'une réponse locale, qui doit être
- *  vérifié avant de laisser le stagiaire terminer son épreuve. */
+/** Tente d'enregistrer UNE réponse côté serveur, avec plusieurs essais (courte
+ *  pause entre chaque). Utilisée uniquement pendant l'envoi final (voir
+ *  envoyerReponsesEtTerminer) — plus pendant la navigation normale. */
 async function enregistrerAvecReprise(q, choix, tentatives = 3) {
   for (let essai = 1; essai <= tentatives; essai++) {
     try {
       await rpc('enregistrer_reponse', {
         p_jeton: Q.jeton, p_epreuve_question_id: q.id, p_reponses: choix,
       });
-      q.enregistrement = 'ok';
       return true;
     } catch (e) {
       DEBUG.erreur('enregistrer_reponse (essai ' + essai + '/' + tentatives + ')', e.message);
       if (essai < tentatives) await new Promise(r => setTimeout(r, 700 * essai));
     }
   }
-  q.enregistrement = 'erreur';
-  toast('Réponse non enregistrée, vérifie ta connexion', 'erreur');
   return false;
 }
 
@@ -217,7 +267,6 @@ function rafraichirBarreEtPastilles() {
     const b = pastilles[i];
     if (!b) return;
     b.classList.toggle('faite', (x.reponse_donnee || []).length > 0);
-    b.classList.toggle('erreur', x.enregistrement === 'erreur');
   });
 }
 
@@ -233,63 +282,66 @@ async function terminerQcm() {
   const restantes = Q.sujet.questions.filter(x => !(x.reponse_donnee || []).length).length;
   if (restantes && !confirmer(
     `${restantes} question(s) sans réponse.\nTerminer quand même ?`)) return;
+  await envoyerReponsesEtTerminer();
+}
 
-  const bouton = document.querySelector('.pied-passation .principal');
-  if (bouton) { bouton.disabled = true; bouton.textContent = 'Vérification des réponses…'; }
-  const ok = await verifierEnregistrements();
-  if (!ok) {
-    if (bouton) { bouton.disabled = false; bouton.textContent = 'Terminer'; }
-    toast('Certaines réponses n\'ont pas pu être confirmées enregistrées '
-      + '(connexion instable). Repère les questions en rouge, revois-les, '
-      + 'puis réessaie de terminer.', 'erreur', 8000);
+/** 2026-09-05 : c'est ICI que toutes les réponses gardées en cache local
+ *  partent vers le serveur, une seule fois, au moment de "Terminer" —
+ *  avec un écran dédié montrant la progression de l'envoi. Si certaines
+ *  échouent malgré les essais, on NE finalise PAS l'épreuve (le cache
+ *  local est conservé intact) et on propose de réessayer l'envoi. */
+async function envoyerReponsesEtTerminer() {
+  const aEnvoyer = Q.sujet.questions.filter(q => (q.reponse_donnee || []).length > 0);
+  let envoyees = 0;
+  rendreEcranEnvoi(envoyees, aEnvoyer.length);
+
+  const echecs = [];
+  for (const q of aEnvoyer) {
+    const ok = await enregistrerAvecReprise(q, q.reponse_donnee);
+    envoyees++;
+    if (!ok) echecs.push(q);
+    rendreEcranEnvoi(envoyees, aEnvoyer.length, echecs.length);
+  }
+
+  if (echecs.length) {
+    rendreEcranEnvoiEchec(echecs.length, aEnvoyer.length);
     return;
   }
+
   await finaliserQcm();
 }
 
-/** Avant de clore l'épreuve : réessaie les réponses en échec local, PUIS revérifie
- *  auprès du serveur (source de vérité) que chaque réponse locale correspond bien
- *  à ce qui est enregistré côté base — un enregistrement peut avoir semblé réussir
- *  côté client tout en échouant côté réseau juste après. Retourne false s'il reste
- *  un écart après tentative de correction : on bloque alors la fin d'épreuve plutôt
- *  que de risquer une copie incomplète silencieuse. */
-async function verifierEnregistrements() {
-  const aReprendre = Q.sujet.questions.filter(q =>
-    (q.reponse_donnee || []).length > 0 && q.enregistrement !== 'ok');
-  for (const q of aReprendre) {
-    await enregistrerAvecReprise(q, q.reponse_donnee);
-  }
-  rafraichirBarreEtPastilles();
+function rendreEcranEnvoi(envoyees, total, echecs = 0) {
+  $('#ecran').innerHTML = `
+    <div class="stagiaire-accueil">
+      <div class="carte">
+        <h1>Envoi de tes réponses…</h1>
+        <div class="jauge"><div style="width:${total ? (envoyees / total) * 100 : 100}%"></div></div>
+        <p class="aide">${envoyees}/${total} envoyée(s)${echecs ? ` — ${echecs} en erreur, nouvel essai en cours` : ''}.
+          Ne ferme pas cette page.</p>
+      </div>
+    </div>`;
+}
 
-  let sujetServeur;
-  try {
-    sujetServeur = await rpc('sujet_stagiaire', { p_jeton: Q.jeton });
-  } catch (e) {
-    DEBUG.erreur('verifierEnregistrements — relecture serveur', e.message);
-    return false; // impossible de vérifier => on ne prend pas le risque de conclure
-  }
-  const serveurParId = Object.fromEntries(sujetServeur.questions.map(x => [x.id, x.reponse_donnee || []]));
-  const memes = (a, b) => a.length === b.length && a.every(v => b.includes(v));
-
-  let toutOk = true;
-  Q.sujet.questions.forEach(q => {
-    const local = q.reponse_donnee || [];
-    const distant = serveurParId[q.id] || [];
-    if (!memes(local, distant)) {
-      q.enregistrement = 'erreur';
-      toutOk = false;
-    } else if (local.length > 0) {
-      q.enregistrement = 'ok';
-    }
-  });
-  rafraichirBarreEtPastilles();
-  return toutOk;
+function rendreEcranEnvoiEchec(nbEchecs, total) {
+  $('#ecran').innerHTML = `
+    <div class="stagiaire-accueil">
+      <div class="carte">
+        <h1>Envoi incomplet</h1>
+        <p class="ko">${nbEchecs} réponse(s) sur ${total} n'ont pas pu être envoyées
+          (connexion instable).</p>
+        <p class="aide">Tes réponses restent gardées sur cet appareil, rien n'est perdu —
+          vérifie ta connexion (ou rapproche-toi du routeur wifi) puis réessaie.</p>
+        <button class="principal" onclick="envoyerReponsesEtTerminer()">Réessayer l'envoi</button>
+      </div>
+    </div>`;
 }
 
 async function finaliserQcm() {
   clearInterval(Q.minuteur);
   try {
     await rpc('terminer_epreuve', { p_jeton: Q.jeton });
+    effacerCacheReponses();
     $('#ecran').innerHTML = `
       <div class="stagiaire-accueil">
         <div class="carte succes-final">
@@ -314,7 +366,7 @@ function demarrerChrono() {
       el.textContent = `${min}:${String(sec).padStart(2, '0')}`;
       el.className = reste < 300000 ? 'urgent' : '';
     }
-    if (reste <= 0) { clearInterval(Q.minuteur); toast('Temps écoulé'); finaliserQcm(); }
+    if (reste <= 0) { clearInterval(Q.minuteur); toast('Temps écoulé'); envoyerReponsesEtTerminer(); }
   };
   maj();
   Q.minuteur = setInterval(maj, 1000);

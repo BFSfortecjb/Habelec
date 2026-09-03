@@ -1176,7 +1176,16 @@ async function voirCopie(stagiaireId) {
     <ol class="copie">${(qs || []).map(q => {
       const donnees = q.reponses_stagiaire?.reponses_ids || [];
       const juste = q.reponses_stagiaire?.correcte;
-      const sansReponse = donnees.length === 0;
+      // 2026-09-05 (demande de Jeremy) : le bouton "Saisir la réponse à sa
+      // place" ne doit pas dépendre juste d'un tableau vide, mais du fait
+      // qu'AUCUN des ids enregistrés ne correspond à une proposition
+      // actuelle de la question — sinon une réponse devenue orpheline (ex.
+      // options d'une question modifiées depuis) s'affiche à l'écran comme
+      // "toutes les cases décochées" sans que le bouton de re-saisie
+      // n'apparaisse pour autant.
+      const idsPropositionsValides = new Set(q.questions.question_reponses.map(r => r.id));
+      const auMoinsUneReponseValide = donnees.some(id => idsPropositionsValides.has(id));
+      const sansReponse = !auMoinsUneReponseValide;
       const titresConcernes = gabaritsVises.filter(g => themesParTitre[g]?.has(q.theme_code));
       const editionReponse = EDITION_COPIE.reponses.has(q.id);
       const editionCle = EDITION_COPIE.cles.has(q.question_id);
