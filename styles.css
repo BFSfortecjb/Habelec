@@ -163,9 +163,11 @@ button.icone:hover { background: var(--gris-fond); border-radius: 6px; }
 /* --------------------------- formulaires --------------------------- */
 .formulaire label { display: block; margin-bottom: 12px; font-size: 13.5px; color: var(--gris); }
 .formulaire input[type=text], .formulaire input[type=email], .formulaire input[type=password],
-.formulaire input[type=number], .formulaire select, .formulaire textarea, .connexion input {
+.formulaire input[type=number], .formulaire select, .formulaire textarea, .connexion input,
+.stagiaire-accueil input {
   display: block; width: 100%; margin-top: 4px; padding: 8px 10px;
   border: 1px solid var(--gris-bord); border-radius: 8px; font: inherit; color: var(--noir);
+  box-sizing: border-box;
 }
 .formulaire input:focus, .formulaire select:focus, .formulaire textarea:focus,
 .connexion input:focus {
@@ -418,4 +420,24 @@ details h4 { margin-top: 14px; font-size: 13px; color: var(--gris-doux); }
   .entete { gap: 12px; padding: 10px 14px; }
   main { padding: 14px; }
   .info-passation { gap: 18px; }
+}
+
+
+/* 2026-09-03 : QR codes repliables sur la fiche session (dropdown) */
+.qr-repliable {
+  margin-top: 4px;
+}
+.qr-repliable summary {
+  cursor: pointer;
+  list-style: none;
+}
+.qr-repliable summary::-webkit-details-marker { display: none; }
+.qr-repliable summary::before {
+  content: "▸ ";
+}
+.qr-repliable[open] summary::before {
+  content: "▾ ";
+}
+.qr-repliable > *:not(summary) {
+  margin-top: 8px;
 }

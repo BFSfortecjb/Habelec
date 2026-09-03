@@ -272,15 +272,20 @@ async function rendreDetailSession(zone) {
       <div><b>Code à dicter en salle</b><div class="code-geant">${esc(s.code_acces)}</div></div>
       <div><b>Adresse de connexion stagiaires</b><div><code>${esc(lienStagiaire)}</code></div>
         <button class="lien" onclick="navigator.clipboard.writeText('${esc(lienStagiaire)}');toast('Lien copié')">Copier le lien</button></div>
-      <div><b>QR code</b><div id="qr-passation"></div>
+      <details class="qr-repliable">
+        <summary><b>QR code examen</b></summary>
+        <div id="qr-passation"></div>
         <p id="qr-erreur" class="erreur-discrete" hidden></p>
-        <button class="lien" onclick="telechargerQrPassation()">Télécharger l'image</button></div>
-      <div><b>QCM de positionnement (entraînement libre)</b>
+        <button class="lien" onclick="telechargerQrPassation()">Télécharger l'image</button>
+      </details>
+      <details class="qr-repliable">
+        <summary><b>QCM de positionnement (entraînement libre)</b></summary>
         <div id="qr-entrainement"></div>
         <p class="aide">QR différent de l'examen : le stagiaire choisit ses titres visés et
           s'entraîne avec les réponses affichées, sans impact sur son dossier.</p>
         <div><code>${esc(lienEntrainement)}</code></div>
-        <button class="lien" onclick="navigator.clipboard.writeText('${esc(lienEntrainement)}');toast('Lien copié')">Copier le lien</button></div>
+        <button class="lien" onclick="navigator.clipboard.writeText('${esc(lienEntrainement)}');toast('Lien copié')">Copier le lien</button>
+      </details>
       <div><b>N° de session Galaxy</b><div>${esc(s.numero_session_galaxy) || '<i>non renseigné</i>'}</div>
         <button class="lien" onclick="modifierNumeroGalaxy()">Modifier</button></div>
       <div><b>Lieu de la formation</b><div>${esc(s.lieu) || '<i>non renseigné</i>'}</div>
