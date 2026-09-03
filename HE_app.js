@@ -952,6 +952,17 @@ async function editerStagiaire(id) {
         const { error } = await sb.from('stagiaires').update(donnees).eq('id', id);
         if (error) throw error;
         await sb.from('stagiaire_symboles').delete().eq('stagiaire_id', id);
+        // 2026-09-05 (demande de Jeremy) : un titre décoché ici doit aussi
+        // disparaître de resultats_symbole (statut pratique, avis,
+        // préconisation...) — sinon une ligne orpheline y reste "en
+        // attente" pour toujours (plus aucun écran ne permet de la
+        // valider, puisque le titre n'est plus visé) et continue d'être
+        // reprise par generer_titre au moment de générer le titre/avis.
+        if (symboles.length) {
+          await sb.from('resultats_symbole').delete().eq('stagiaire_id', id).not('symbole_code', 'in', `(${symboles.join(',')})`);
+        } else {
+          await sb.from('resultats_symbole').delete().eq('stagiaire_id', id);
+        }
       } else {
         const { data, error } = await sb.from('stagiaires').insert(donnees).select().single();
         if (error) throw error;
