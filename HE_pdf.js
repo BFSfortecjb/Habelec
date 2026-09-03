@@ -16,7 +16,7 @@ const { jsPDF } = window.jspdf;
 // après un déploiement, que le navigateur a bien chargé le dernier
 // HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
 // modification notable de ce fichier ; aucun effet fonctionnel.
-const PDF_VERSION = 'v20-2026-09-03';
+const PDF_VERSION = 'v21-2026-09-03';
 
 // 2026-08-28 (demande de Jeremy) : sauvegarde automatique, best-effort, des
 // PDF stagiaires sur Google Drive (compte de service configuré dans l'onglet
@@ -724,13 +724,22 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
     doc.setLineWidth(0.2);
   }
 
-  // Champs Nom / Prénom / Société à remplir à la main (2026-09-05, demande
-  // de Jeremy) — laissés vides, comme sur le volet 1 (case "LE TITULAIRE").
+  // Champs Nom / Prénom / Société pré-remplis avec les infos du stagiaire
+  // (2026-09-03, demande de Jeremy — initialement laissés vides le
+  // 2026-09-05, revu ensuite) : même repli entreprise/session que le volet 1
+  // (case "LE TITULAIRE").
   const yChamps = yEncadre + 27;
   doc.setFont('helvetica', 'bold').setFontSize(9).setTextColor(...BFS.noir);
-  doc.text('Nom :', xV3 + 4, yChamps);
-  doc.text('Prénom :', xV3 + 4, yChamps + 10);
-  doc.text('Société :', xV3 + 4, yChamps + 20);
+  const champTitulaire = (libelle, valeur, y) => {
+    doc.setFont('helvetica', 'bold');
+    doc.text(libelle, xV3 + 4, y);
+    const largeurLibelle = doc.getTextWidth(libelle);
+    doc.setFont('helvetica', 'normal');
+    doc.text(valeur || '', xV3 + 4 + largeurLibelle + 2, y);
+  };
+  champTitulaire('Nom :', st.nom, yChamps);
+  champTitulaire('Prénom :', st.prenom, yChamps + 10);
+  champTitulaire('Société :', st.entreprise || session?.entreprise, yChamps + 20);
 
   doc.setFont('helvetica', 'normal').setFontSize(6.5);
   doc.text('Cette habilitation n\'autorise pas à elle seule son titulaire à effectuer de son propre '
