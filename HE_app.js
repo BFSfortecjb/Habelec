@@ -2062,8 +2062,8 @@ async function rendreOrganisme(zone) {
     <div class="barre-actions"><h2>Organisme</h2></div>
     <form id="form-organisme" class="formulaire carte">
       <div class="grille-2">
-        <label>Raison sociale <input name="raison_sociale" required value="${esc(o.raison_sociale)}"></label>
-        <label>Adresse <input name="adresse" value="${esc(o.adresse)}"></label>
+        <label>Raison sociale — Sèvremont / Bocage <input name="raison_sociale" required value="${esc(o.raison_sociale)}"></label>
+        <label>Adresse — Sèvremont / Bocage <input name="adresse" value="${esc(o.adresse)}"></label>
         <label>Nom du signataire <input name="signataire_nom" value="${esc(o.signataire_nom)}"></label>
         <label>Fonction du signataire <input name="signataire_fonction" value="${esc(o.signataire_fonction)}"></label>
         <label>Validité des titres (années)
@@ -2073,8 +2073,20 @@ async function rendreOrganisme(zone) {
         l'avis d'habilitation — pas sur le titre, que l'employeur signe à la main)</legend>
         ${widgetSignature('signature-organisme', o.signature_data)}
       </fieldset>
-      <fieldset><legend>Cachet de l'organisme (apposé automatiquement sur l'avis d'habilitation)</legend>
+      <fieldset><legend>Cachet — Sèvremont / Bocage Formation Sécurité (apposé automatiquement
+        sur l'avis d'habilitation des sessions ayant lieu à Sèvremont)</legend>
         ${widgetImage('cachet-organisme', o.cachet_data)}
+      </fieldset>
+      <!-- 2026-09-03 (demande de Jeremy) : deuxième centre (Briec / Bretagne Formation
+        Sécurité) — raison sociale, adresse et cachet propres, choisis automatiquement
+        sur l'avis selon le lieu de la session (sessions_formation.lieu). -->
+      <fieldset><legend>Raison sociale et cachet — Briec / Bretagne Formation Sécurité
+        (utilisés automatiquement sur l'avis des sessions ayant lieu à Briec)</legend>
+        <div class="grille-2">
+          <label>Raison sociale <input name="raison_sociale_briec" value="${esc(o.raison_sociale_briec)}"></label>
+          <label>Adresse <input name="adresse_briec" value="${esc(o.adresse_briec)}"></label>
+        </div>
+        ${widgetImage('cachet-organisme-briec', o.cachet_data_briec)}
       </fieldset>
       <fieldset><legend>Questions fondamentales</legend>
         <label class="case"><input type="checkbox" name="fondamentales_actives" ${o.fondamentales_actives === false ? '' : 'checked'}>
@@ -2107,6 +2119,7 @@ async function rendreOrganisme(zone) {
 
   activerSignature('signature-organisme');
   activerImage('cachet-organisme');
+  activerImage('cachet-organisme-briec');
   $('#form-organisme').addEventListener('submit', async ev => {
     ev.preventDefault();
     const f = ev.target;
@@ -2114,11 +2127,14 @@ async function rendreOrganisme(zone) {
     const donnees = {
       raison_sociale: f.raison_sociale.value.trim(),
       adresse: f.adresse.value.trim(),
+      raison_sociale_briec: f.raison_sociale_briec.value.trim(),
+      adresse_briec: f.adresse_briec.value.trim(),
       signataire_nom: f.signataire_nom.value.trim(),
       signataire_fonction: f.signataire_fonction.value.trim(),
       validite_annees: parseInt(f.validite_annees.value, 10) || 3,
       signature_data: lireSignature('signature-organisme'),
       cachet_data: lireImage('cachet-organisme'),
+      cachet_data_briec: lireImage('cachet-organisme-briec'),
       drive_dossier_racine_id: f.drive_dossier_racine_id.value.trim() || null,
       fondamentales_actives: f.fondamentales_actives.checked,
     };

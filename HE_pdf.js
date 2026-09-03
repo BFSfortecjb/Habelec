@@ -16,7 +16,7 @@ const { jsPDF } = window.jspdf;
 // après un déploiement, que le navigateur a bien chargé le dernier
 // HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
 // modification notable de ce fichier ; aucun effet fonctionnel.
-const PDF_VERSION = 'v22-2026-09-03';
+const PDF_VERSION = 'v23-2026-09-03';
 
 // 2026-08-28 (demande de Jeremy) : sauvegarde automatique, best-effort, des
 // PDF stagiaires sur Google Drive (compte de service configuré dans l'onglet
@@ -445,12 +445,21 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
   // l'autre ; colonne de droite : date + signature/cachet, sur toute la
   // hauteur des deux lignes de gauche (rowSpan).
   const largeurColOrg = largeurUtile * 0.55, largeurColSignature = largeurUtile * 0.45;
+  // 2026-09-03 (demande de Jeremy) : raison sociale, adresse et cachet
+  // dépendent du centre où a eu lieu la session (Sèvremont/Bocage par
+  // défaut, Briec/Bretagne si session.lieu === 'Briec') — même logique que
+  // la constante SITES plus bas, qui pilote déjà la marque/tél. du volet 3.
+  const estBriec = session?.lieu === 'Briec';
+  const raisonSocialeAffichee = estBriec ? (org.raison_sociale_briec || org.raison_sociale) : org.raison_sociale;
+  const adresseAffichee = estBriec ? (org.adresse_briec || org.adresse) : org.adresse;
+  const cachetAffiche = estBriec ? (org.cachet_data_briec || org.cachet_data) : org.cachet_data;
   doc.autoTable({
     startY: y, margin: { left: marge, right: marge }, theme: 'grid',
     styles: { fontSize: 8.5, cellPadding: 2.2 },
     columnStyles: { 0: { cellWidth: largeurColOrg }, 1: { cellWidth: largeurColSignature } },
     body: [
-      [`ORGANISME DE FORMATION : ${org.raison_sociale || ''}`,
+      [`ORGANISME DE FORMATION : ${raisonSocialeAffichee || ''}`
+          + (adresseAffichee ? `\n${adresseAffichee}` : ''),
         { content: `Date : ${dateFr(new Date().toISOString())}\nSignature et cachet de l'organisme :`,
           rowSpan: 2, styles: { minCellHeight: 30, valign: 'top' } }],
       [`RESPONSABLE : ${[org.signataire_nom, org.signataire_fonction].filter(Boolean).join(' — ')}`],
@@ -465,7 +474,7 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
   const xColSignature = marge + largeurColOrg;
   ajouterImageSure(doc, org.signature_data, null,
     xColSignature + largeurColSignature - 28, doc.lastAutoTable.finalY - 11, 26, 9);
-  ajouterImageSure(doc, org.cachet_data, null,
+  ajouterImageSure(doc, cachetAffiche, null,
     xColSignature + 2, doc.lastAutoTable.finalY - 21, 42, 19);
   y = doc.lastAutoTable.finalY + 4;
 
