@@ -16,7 +16,7 @@ const { jsPDF } = window.jspdf;
 // après un déploiement, que le navigateur a bien chargé le dernier
 // HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
 // modification notable de ce fichier ; aucun effet fonctionnel.
-const PDF_VERSION = 'v21-2026-09-03';
+const PDF_VERSION = 'v22-2026-09-03';
 
 // 2026-08-28 (demande de Jeremy) : sauvegarde automatique, best-effort, des
 // PDF stagiaires sur Google Drive (compte de service configuré dans l'onglet
@@ -536,9 +536,13 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
     // plutôt le contenu existant pour occuper le même espace.
     styles: { fontSize: 7, cellPadding: 2.2, valign: 'middle' },
     headStyles: { fillColor: BFS.jaune, textColor: BFS.noir, fontStyle: 'bold', halign: 'center' },
+    // 2026-09-03 (demande de Jeremy) : "Symbole d'habilitation" et "Domaine
+    // de tension" centrés dans leur colonne (comme l'en-tête), au lieu de
+    // rester alignés à gauche par défaut.
     columnStyles: {
-      0: { cellWidth: 34 }, 1: { cellWidth: 30, fontStyle: 'bold' },
-      2: { cellWidth: 23 }, 3: { cellWidth: 47 }, 4: { cellWidth: largeurUtileCarte - 34 - 30 - 23 - 47 },
+      0: { cellWidth: 34 }, 1: { cellWidth: 30, fontStyle: 'bold', halign: 'center' },
+      2: { cellWidth: 23, halign: 'center' }, 3: { cellWidth: 47 },
+      4: { cellWidth: largeurUtileCarte - 34 - 30 - 23 - 47 },
     },
     head: [['Personnel', 'Symbole d\'habilitation\net attribut', 'Domaine\nde tension',
       'Installations concernées', 'Indications supplémentaires']],
@@ -667,7 +671,7 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
   doc.setTextColor(...BFS.noir).setFont('helvetica', 'bold').setFontSize(9);
   doc.text('AVIS', xc2, zHaut + 6, { align: 'center' });
   doc.setFont('helvetica', 'normal').setFontSize(6);
-  doc.text(
+  const texteAvis =
     'Le présent titre d\'habilitation est établi et signé par l\'employeur puis remis à l\'intéressé '
     + 'qui doit également le signer.\n'
     + 'Ce titre est strictement personnel et ne peut être utilisé par un tiers.\n'
@@ -676,15 +680,28 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
     + 'Ce titre doit comporter les indications précises correspondant aux 3 caractères et à l\'attribut '
     + 'composant le symbole de chaque habilitation et celles relatives aux activités que le personnel '
     + 'sera autorisé à pratiquer.\n'
-    + 'La rubrique « indications supplémentaires » doit obligatoirement être remplie.',
-    xV2 + 3, zHaut + 12, { maxWidth: largeurVolet - 6, lineHeightFactor: 1.25 });
+    + 'La rubrique « indications supplémentaires » doit obligatoirement être remplie.';
+  // 2026-09-03 (demande de Jeremy) : la position de "AUTORISATIONS OU
+  // INTERDICTIONS SPECIALES" était fixe (zHaut + 44) alors que le texte AVIS
+  // au-dessus a une hauteur variable une fois habillé sur largeurVolet - 6
+  // (retours à la ligne + habillage automatique) : sur certains titres, le
+  // texte débordait et chevauchait le titre "AUTORISATIONS...". On mesure
+  // maintenant la hauteur réellement occupée par le texte AVIS et on ne
+  // descend "AUTORISATIONS..." que si nécessaire.
+  const yAvisDebut = zHaut + 12;
+  const lineHeightFactorAvis = 1.25;
+  doc.text(texteAvis, xV2 + 3, yAvisDebut, { maxWidth: largeurVolet - 6, lineHeightFactor: lineHeightFactorAvis });
+  const nbLignesAvis = doc.splitTextToSize(texteAvis, largeurVolet - 6).length;
+  const hauteurLigneAvis = 6 * 0.3528 * lineHeightFactorAvis;
+  const yApresAvis = yAvisDebut + nbLignesAvis * hauteurLigneAvis;
 
   doc.setFont('helvetica', 'bold').setFontSize(7).setTextColor(...BFS.noir);
-  doc.text('AUTORISATIONS OU INTERDICTIONS SPECIALES :', xV2 + 3, zHaut + 44,
+  const yAutorisations = Math.max(zHaut + 44, yApresAvis + 3);
+  doc.text('AUTORISATIONS OU INTERDICTIONS SPECIALES :', xV2 + 3, yAutorisations,
     { maxWidth: largeurVolet - 6 });
   doc.setDrawColor(...BFS.gris).setLineWidth(0.3);
   const nbLignesAutorisations = 6;
-  const yLignesDebut = zHaut + 52, yLignesFin = zBas - 4;
+  const yLignesDebut = yAutorisations + 8, yLignesFin = zBas - 4;
   for (let i = 0; i < nbLignesAutorisations; i++) {
     const y = yLignesDebut + i * (yLignesFin - yLignesDebut) / (nbLignesAutorisations - 1);
     doc.line(xV2 + 3, y, xV2 + largeurVolet - 3, y);
@@ -924,14 +941,26 @@ async function construireDocPreuveExamen(stagiaireId) {
   y = doc.lastAutoTable.finalY + 4;
 
   // Détail pratique : une section par titre (ligne pleine largeur, fond gris)
-  // suivie de ses items de savoir-faire (2 colonnes) — autotable gère la
-  // pagination automatiquement si ça dépasse une page.
-  const corpsPratique = [];
+  // suivie de ses items de savoir-faire (2 colonnes). 2026-09-03 (demande de
+  // Jeremy, ex. constaté sur BR pour Michel) : un titre était parfois séparé
+  // de ses items par un saut de page automatique d'autoTable. On dessine
+  // maintenant un autoTable par titre (bandeau + ses items ensemble) et on
+  // force un saut de page manuel AVANT le groupe s'il ne tient pas en entier
+  // sur la page courante, plutôt que de laisser autoTable le couper.
+  const styleTestPratique = {
+    margin: { left: marge, right: marge }, theme: 'grid',
+    styles: { fontSize: 8, cellPadding: 1.8, valign: 'middle' },
+    headStyles: { fillColor: BFS.jaune, textColor: BFS.noir, fontStyle: 'bold' },
+    columnStyles: { 0: { cellWidth: largeurUtile * 0.7 }, 1: { cellWidth: largeurUtile * 0.3 } },
+  };
+  const hauteurPage = doc.internal.pageSize.getHeight();
+  const hauteurLigneEstimee = 6.2; // cellPadding 1.8 * 2 + fontSize 8 environ
+  const hauteurEnteteEstimee = 8;
+  let enteteTestPratiqueAffichee = false;
   titresData.forEach(t => {
-    corpsPratique.push([{
-      content: t.libelle
-        + (t.pratique === null && t.pratiqueVerdict === undefined ? '' : ''),
-      colSpan: 2,
+    const lignesGroupe = [];
+    lignesGroupe.push([{
+      content: t.libelle, colSpan: 2,
       styles: { fillColor: BFS.grisClair, fontStyle: 'bold', textColor: BFS.noir },
     }]);
     if (t.pratique === null) {
@@ -940,30 +969,39 @@ async function construireDocPreuveExamen(stagiaireId) {
         : t.pratiqueVerdict === false ? 'Non validée' : 'En attente';
       const couleur = t.pratiqueVerdict === true ? BFS.vert
         : t.pratiqueVerdict === false ? BFS.rouge : BFS.gris;
-      corpsPratique.push(['—', { content: texte, styles: { textColor: couleur, fontStyle: 'bold', halign: 'right' } }]);
+      lignesGroupe.push(['—', { content: texte, styles: { textColor: couleur, fontStyle: 'bold', halign: 'right' } }]);
     } else if (!t.pratique.length) {
-      corpsPratique.push([{ content: 'Aucune évaluation enregistrée', colSpan: 2,
+      lignesGroupe.push([{ content: 'Aucune évaluation enregistrée', colSpan: 2,
         styles: { textColor: BFS.gris, fontStyle: 'italic' } }]);
     } else {
       t.pratique.forEach(item => {
-        corpsPratique.push([item.libelle,
+        lignesGroupe.push([item.libelle,
           { content: `${item.note} — ${NOTE_LIBELLE[item.note]}`,
             styles: { textColor: NOTE_COULEUR[item.note], fontStyle: 'bold', halign: 'right' } }]);
       });
     }
+
+    const hauteurGroupeEstimee = (enteteTestPratiqueAffichee ? 0 : hauteurEnteteEstimee)
+      + lignesGroupe.length * hauteurLigneEstimee;
+    if (y + hauteurGroupeEstimee > hauteurPage - marge) {
+      doc.addPage();
+      y = marge;
+      enteteTestPratiqueAffichee = false;
+    }
+
+    doc.autoTable({
+      ...styleTestPratique,
+      startY: y,
+      head: enteteTestPratiqueAffichee ? undefined : [[
+        { content: 'TEST PRATIQUE', styles: { halign: 'left' } },
+        { content: 'A sans erreur · B mineure · C majeure · D grave', styles: { halign: 'right', fontSize: 6.5 } },
+      ]],
+      body: lignesGroupe,
+    });
+    y = doc.lastAutoTable.finalY;
+    enteteTestPratiqueAffichee = true;
   });
-  doc.autoTable({
-    startY: y, margin: { left: marge, right: marge }, theme: 'grid',
-    styles: { fontSize: 8, cellPadding: 1.8, valign: 'middle' },
-    headStyles: { fillColor: BFS.jaune, textColor: BFS.noir, fontStyle: 'bold' },
-    columnStyles: { 0: { cellWidth: largeurUtile * 0.7 }, 1: { cellWidth: largeurUtile * 0.3 } },
-    head: [[
-      { content: 'TEST PRATIQUE', styles: { halign: 'left' } },
-      { content: 'A sans erreur · B mineure · C majeure · D grave', styles: { halign: 'right', fontSize: 6.5 } },
-    ]],
-    body: corpsPratique,
-  });
-  y = doc.lastAutoTable.finalY + 4;
+  y += 4;
 
   const titresAvecPreconisation = titresData.filter(t => t.preconisation);
   if (titresAvecPreconisation.length) {
