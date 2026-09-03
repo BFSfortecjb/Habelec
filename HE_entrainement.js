@@ -12,17 +12,32 @@
    session (juste pour retrouver l'intitulé affiché à l'écran).
    ===================================================================== */
 
-const ENT = { code: null, session: null, questions: [], index: 0 };
+const ENT = { code: null, session: null, questions: [], index: 0, symboles: null };
 
 async function ecranEntrainement(cible) {
   const codePrerempli = new URLSearchParams(location.hash.split('?')[1] || '').get('code');
   if (!ENT.code && codePrerempli) ENT.code = codePrerempli.toUpperCase();
   if (ENT.questions.length) return rendreQuestionEntrainement(cible);
+
+  // 2026-09-04 (correctif) : la liste des titres ne peut pas venir de
+  // S.referentiel ici — ce visiteur n'a pas de compte, et les SELECT
+  // directs sur les tables de référence sont soumis aux policies RLS (qui
+  // n'autorisent pas le rôle anonyme). On passe par une fonction dédiée,
+  // sécurisée et strictement en lecture seule (liste_symboles_public).
+  if (!ENT.symboles) {
+    cible.innerHTML = '<div class="stagiaire-accueil"><p class="sous-titre">Chargement…</p></div>';
+    try {
+      ENT.symboles = await rpc('liste_symboles_public');
+    } catch (e) {
+      ENT.symboles = [];
+      erreurSupabase('Chargement des titres', e);
+    }
+  }
   rendreChoixTitresEntrainement(cible);
 }
 
 function rendreChoixTitresEntrainement(cible) {
-  const symboles = (S.referentiel.symboles || []).slice()
+  const symboles = (ENT.symboles || []).slice()
     .sort((a, b) => (a.libelle || '').localeCompare(b.libelle || ''));
   cible.innerHTML = `
     <div class="stagiaire-accueil">
@@ -37,7 +52,7 @@ function rendreChoixTitresEntrainement(cible) {
           ${symboles.length
             ? symboles.map(sy => `
                 <label class="case"><input type="checkbox" name="symbole" value="${esc(sy.code)}"> ${esc(sy.libelle)}</label>`).join('')
-            : '<p class="aide">Référentiel non chargé — recharge la page.</p>'}
+            : '<p class="aide">Impossible de charger la liste des titres — vérifie ta connexion et recharge la page.</p>'}
         </fieldset>
         <button class="principal" type="submit">Commencer</button>
       </form>
