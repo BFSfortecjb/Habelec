@@ -439,8 +439,29 @@ function ligneStagiaire(st, suivi, resultatsSymboles) {
         onclick="saisirResultatExterne('${st.id}')">📋${st.evaluation_externe ? ' ✓' : ''}</button>
       <button class="icone" title="Préconisation du formateur en cas d'échec (affichée sur l'avis)"
         onclick="saisirPreconisations('${st.id}')">✏️</button>
+      <button class="icone" title="QCM de rattrapage : uniquement sur le(s) titre(s) en échec au premier passage"
+        onclick="proposerRattrapage('${st.id}')">🔁</button>
       <button class="icone" title="Supprimer" onclick="supprimerStagiaire('${st.id}')">🗑</button>
     </td></tr>`;
+}
+
+/* ---------- QCM de rattrapage (2026-09-04, demande de Jeremy) ----------
+ * Uniquement sur le(s) titre(s) en échec au premier passage — les titres
+ * déjà validés ne sont pas repassés. Le premier passage reste visible dans
+ * l'historique (voir voirCopie / genererPreuveExamenPdf, qui listent les
+ * deux épreuves). La fonction SQL refuse elle-même si le premier passage
+ * n'est pas encore corrigé, ou si aucun titre n'est en échec. */
+async function proposerRattrapage(stagiaireId) {
+  if (!confirmer('Générer un QCM de rattrapage, uniquement sur le(s) titre(s) en échec ?\n'
+    + 'Les titres déjà validés ne seront pas repassés.')) return;
+  try {
+    await rpc('generer_qcm_rattrapage', { p_stagiaire_id: stagiaireId });
+    toast('QCM de rattrapage généré');
+    rendreDetailSession($('#contenu'));
+  } catch (e) {
+    // Le message SQL précise le cas (premier passage pas corrigé, rien en échec...)
+    erreurSupabase('Génération du rattrapage', e);
+  }
 }
 
 /* ---------- Saisie simplifiée : résultat de formateur externe --------

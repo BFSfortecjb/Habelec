@@ -337,6 +337,15 @@ details h4 { margin-top: 14px; font-size: 13px; color: var(--gris-doux); }
 }
 .proposition:hover { border-color: var(--jaune); background: #fffdf8; }
 .proposition.choisie { border-color: var(--jaune); background: var(--jaune-fond); box-shadow: inset 3px 0 0 var(--jaune); }
+
+/* QCM de positionnement (2026-09-03) : correction affichée immédiatement */
+.proposition.bonne { border-color: var(--vert); background: var(--vert-fond); box-shadow: inset 3px 0 0 var(--vert); }
+.proposition.mauvaise { border-color: var(--rouge); background: var(--rouge-fond); box-shadow: inset 3px 0 0 var(--rouge); }
+.correction-entrainement { margin-top: 14px; padding: 12px 16px; border-radius: 10px; background: var(--gris-fond); }
+.correction-entrainement .ok { color: var(--vert); }
+.correction-entrainement .ko { color: var(--rouge); }
+.correction-entrainement .explication { margin: 6px 0 0; color: var(--gris); }
+
 .proposition input { margin-top: 3px; width: 18px; height: 18px; flex: none; accent-color: var(--jaune-fonce); }
 
 .pied-passation { display: flex; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }

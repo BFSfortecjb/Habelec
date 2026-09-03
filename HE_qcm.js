@@ -140,7 +140,8 @@ function rendreQuestion(cible) {
 
       <article class="question">
         <div class="numero">Question ${Q.index + 1} sur ${qs.length}
-          <span class="theme">${esc(q.theme)}</span></div>
+          <span class="theme">${esc(q.theme)}</span>
+          ${Q.sujet.fondamentales_actives && q.fondamentale ? '<span class="puce fond">Question fondamentale</span>' : ''}</div>
         <h2>${esc(q.enonce)}</h2>
         ${q.image_url ? `<img class="vignette-question-qcm" src="${esc(q.image_url)}" alt="Illustration de la question">` : ''}
         ${q.choix_multiple ? '<p class="aide">Plusieurs réponses possibles.</p>' : ''}

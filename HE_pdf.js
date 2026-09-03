@@ -171,13 +171,20 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
   // pour D.3.1.11) alors qu'un seul des deux a été visé. Éviter l'incohérence
   // avec le tableau Annexe C du titre lui-même, qui ne liste que le symbole réel.
   const symbolesStagiaire = (st.stagiaire_symboles || []).map(x => x.symbole_code);
-  const [{ data: session }, { data: ep }, { data: resultatsSymbole }] = await Promise.all([
+  const [{ data: session }, { data: epreuves }, { data: resultatsSymbole }] = await Promise.all([
     sb.from('sessions_formation').select('*').eq('id', st.session_id).single(),
-    sb.from('epreuves_theoriques').select('*').eq('stagiaire_id', stagiaireId).maybeSingle(),
+    // 2026-09-03 (QCM de rattrapage) : jusqu'à 2 lignes par stagiaire —
+    // 'initiale' (tous les titres visés) et, si généré, 'rattrapage' (les
+    // titres ratés au premier passage seulement). Voir plus bas : le détail
+    // par titre pioche dans le rattrapage quand il existe et couvre ce
+    // titre, sinon dans l'initiale.
+    sb.from('epreuves_theoriques').select('*').eq('stagiaire_id', stagiaireId),
     // Préconisations du formateur (2026-08-28, demande de Jeremy) : saisies à la main,
     // affichées dans "Détail par titre visé" sur les lignes en échec — voir plus bas.
     sb.from('resultats_symbole').select('symbole_code, preconisation').eq('stagiaire_id', stagiaireId),
   ]);
+  const ep = (epreuves || []).find(e => (e.type_epreuve || 'initiale') === 'initiale') || null;
+  const epRattrapage = (epreuves || []).find(e => e.type_epreuve === 'rattrapage') || null;
   const preconisationParSymbole = Object.fromEntries(
     (resultatsSymbole || []).filter(r => r.preconisation).map(r => [r.symbole_code, r.preconisation]));
   const org = S.organisme || {};
@@ -194,9 +201,17 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
   // document la réussite ou l'échec de l'évaluation théorique, plus le
   // résultat de l'épreuve pratique du même titre. Demande de Jeremy.
   const gabaritsVises = ep?.gabarits || [];
+  // Le rattrapage ne fait autorité pour un titre que s'il a effectivement
+  // été corrigé — tant qu'il est en cours, l'avis continue de refléter le
+  // premier passage pour ce titre.
+  const epreuvePourGabarit = g => (epRattrapage
+    && epRattrapage.statut === 'corrigee'
+    && (epRattrapage.gabarits || []).includes(g)) ? epRattrapage : ep;
   const [detailsTheorie, { data: pratiques }] = await Promise.all([
-    Promise.all(gabaritsVises.map(g =>
-      rpc('theorie_gabarit_detail', { p_epreuve_id: ep.id, p_gabarit_code: g }).catch(() => null))),
+    Promise.all(gabaritsVises.map(g => {
+      const epG = epreuvePourGabarit(g);
+      return epG ? rpc('theorie_gabarit_detail', { p_epreuve_id: epG.id, p_gabarit_code: g }).catch(() => null) : null;
+    })),
     gabaritsVises.length
       ? sb.from('epreuves_pratiques').select('gabarit_code, reussie')
           .eq('stagiaire_id', stagiaireId).in('gabarit_code', gabaritsVises)
@@ -205,21 +220,13 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
   const detailParGabarit = Object.fromEntries(gabaritsVises.map((g, i) => [g, detailsTheorie[i]]));
   const pratiqueParGabarit = Object.fromEntries((pratiques || []).map(p => [p.gabarit_code, p.reussie]));
 
-  // Nombre de questions fondamentales AFFICHÉ = le total normatif propre à CE
-  // titre (Annexe D.3), pas le total réellement tiré dans l'examen. Quand un
-  // stagiaire vise plusieurs titres à la fois, plan_tirage() mutualise les
-  // thèmes communs (zones, dangers...) en gardant le quota le plus exigeant :
-  // un titre "léger" partagé avec un titre plus exigeant se retrouve avec
-  // plus de questions fondamentales dans SON examen que ce que la norme
-  // demande pour lui seul. Afficher ce total mutualisé sur l'avis aurait été
-  // trompeur (chiffre qui ne correspond à aucune référence documentée) — d'où
-  // ce recalcul depuis gabarit_quotas (S.referentiel, déjà en mémoire), sans
-  // toucher à la validation elle-même (theorie_gabarit_ok reste inchangée,
-  // décision de Jeremy 2026-08-06 : ne corriger que l'affichage pour l'instant).
-  const fondNormeParGabarit = Object.fromEntries(gabaritsVises.map(g => [g,
-    (S.referentiel?.quotas || [])
-      .filter(q => q.gabarit_code === g)
-      .reduce((somme, q) => somme + (q.nb_fondamentales || 0), 0)]));
+  // 2026-09-03 (demande de Jeremy) : le nombre de fondamentales exigé par
+  // titre n'est plus une somme normative (source de "7/4" incohérents) mais
+  // le plafond réellement appliqué à CET examen — 1 fondamentale "tronc
+  // commun" (DANGERS/ZONES/GENERALITES) + 1 par titre visé, voir
+  // generer_qcm() et theorie_gabarit_detail(). d.fond_total (renvoyé par la
+  // fonction SQL) est donc directement le bon chiffre à afficher, plus
+  // besoin de le recalculer ici depuis le référentiel.
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const largeur = 210, hauteurPage = 297, marge = 12, largeurUtile = largeur - 2 * marge;
@@ -350,17 +357,16 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
       body: gabaritsVises.map(g => {
         const d = detailParGabarit[g];
         const pratOk = pratiqueParGabarit[g];
-        const refFond = fondNormeParGabarit[g] || 0;
-        // Score chiffré (ex: 3/4) plutôt qu'un texte "toutes justes / insuffisant"
-        // (demande de Jeremy, 2026-08-27) — le nombre requis vient bien de la
-        // norme (Annexe D.3, voir fondNormeParGabarit ci-dessus), le score
-        // réalisé (d.fond_justes) du résultat réel du stagiaire.
+        const refFond = d?.fond_total || 0;
+        // Score chiffré (ex: 2/2) plutôt qu'un texte "toutes justes / insuffisant"
+        // (demande de Jeremy, 2026-08-27) — requis et score viennent tous les
+        // deux de theorie_gabarit_detail() (voir remarque plus haut).
         const cellule = (texte, couleur) => couleur
           ? { content: texte, styles: { textColor: couleur, fontStyle: 'bold' } }
           : texte;
 
-        const fond = refFond === 0 ? 'aucune exigée'
-          : !d ? `${refFond} requise(s)`
+        const fond = !d ? '—'
+          : refFond === 0 ? 'aucune exigée'
           : cellule(`${d.fond_justes}/${refFond}`, d.fond_ok ? BFS.vert : BFS.rouge);
 
         const theorie = d

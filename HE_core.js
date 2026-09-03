@@ -273,6 +273,13 @@ async function router() {
     S.vision = 'stagiaire';
     return ecranStagiaire(cible);
   }
+  // 2026-09-03 : QCM de positionnement (entraînement libre) — même principe
+  // que #stagiaire (sans compte), mais sujet différent (réponses visibles,
+  // rien n'est enregistré). Voir HE_entrainement.js.
+  if (location.hash.startsWith('#entrainement')) {
+    S.vision = 'entrainement';
+    return ecranEntrainement(cible);
+  }
   if (!S.utilisateur) return ecranConnexion(cible);
   return ecranFormateur(cible);
 }
@@ -286,7 +293,7 @@ async function demarrer() {
 
   window.addEventListener('hashchange', router);
   try {
-    if (!location.hash.startsWith('#stagiaire')) {
+    if (!location.hash.startsWith('#stagiaire') && !location.hash.startsWith('#entrainement')) {
       const etat = await chargerProfil();
       if (etat === 'ok') await chargerReferentiel();
       else if (etat === 'non_autorise') {
