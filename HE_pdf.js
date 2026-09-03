@@ -16,7 +16,7 @@ const { jsPDF } = window.jspdf;
 // après un déploiement, que le navigateur a bien chargé le dernier
 // HE_pdf.js (et non une version mise en cache). À incrémenter à chaque
 // modification notable de ce fichier ; aucun effet fonctionnel.
-const PDF_VERSION = 'v19-2026-09-03';
+const PDF_VERSION = 'v20-2026-09-03';
 
 // 2026-08-28 (demande de Jeremy) : sauvegarde automatique, best-effort, des
 // PDF stagiaires sur Google Drive (compte de service configuré dans l'onglet
@@ -354,7 +354,13 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
         { content: 'Épreuve pratique', styles: { halign: 'center' } },
         { content: 'Préconisation', styles: { halign: 'left' } },
       ]],
-      body: gabaritsVises.map(g => {
+      // 2026-09-03 (demande de Jeremy) : un titre décoché après coup (ex.
+      // via "Modifier le stagiaire") ne doit plus apparaître sur l'avis non
+      // plus — on ignore les gabarits qui ne correspondent plus à aucun
+      // titre actuellement coché (même filtre que sur la preuve d'examen).
+      body: gabaritsVises.filter(g => symbolesStagiaire
+        .some(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g))
+      ).map(g => {
         const d = detailParGabarit[g];
         const pratOk = pratiqueParGabarit[g];
         const refFond = d?.fond_total || 0;
