@@ -1,0 +1,482 @@
+/* =========================================================================
+   Pointage BFS — style.css
+   Charte graphique BFS : Montserrat, gris #464645, jaune #f3ab12,
+   rouge #b2181a, noir #080808.
+   ========================================================================= */
+
+:root {
+  --bfs-gris: #464645;
+  --bfs-jaune: #f3ab12;
+  --bfs-rouge: #b2181a;
+  --bfs-noir: #080808;
+  --bfs-blanc: #ffffff;
+  --bfs-gris-clair: #f2f2f2;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: 'Montserrat', sans-serif;
+  background: var(--bfs-gris-clair);
+  color: var(--bfs-noir);
+}
+
+.pt-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bfs-noir);
+  color: var(--bfs-blanc);
+  padding: 12px 16px;
+}
+
+.pt-header-titre { font-weight: 700; font-size: 1.1rem; }
+
+.pt-header-utilisateur {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+
+.pt-nav {
+  display: flex;
+  background: var(--bfs-gris);
+}
+
+.pt-nav-item {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  background: transparent;
+  color: var(--bfs-blanc);
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pt-nav-item-actif {
+  background: var(--bfs-jaune);
+  color: var(--bfs-noir);
+}
+
+.pt-contenu {
+  padding: 16px;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.pt-carte {
+  background: var(--bfs-blanc);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.pt-btn {
+  background: var(--bfs-jaune);
+  color: var(--bfs-noir);
+  border: none;
+  border-radius: 6px;
+  padding: 12px 18px;
+  font-family: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pt-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.pt-btn-secondaire {
+  background: var(--bfs-gris);
+  color: var(--bfs-blanc);
+}
+
+.pt-btn-petit { padding: 6px 10px; font-size: 0.85rem; }
+
+.pt-btn-grand {
+  display: block;
+  width: 100%;
+  padding: 20px;
+  font-size: 1.1rem;
+  margin: 12px 0;
+}
+
+.pt-liste-horodatages, .pt-liste-activites {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+}
+
+.pt-liste-horodatages li, .pt-liste-activites li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--bfs-gris-clair);
+}
+
+.pt-liste-vide { color: var(--bfs-gris); font-style: italic; }
+
+.pt-badge {
+  background: var(--bfs-gris-clair);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+  color: var(--bfs-gris);
+}
+
+.pt-alerte {
+  background: #fdecea;
+  color: var(--bfs-rouge);
+  border: 1px solid var(--bfs-rouge);
+  border-radius: 6px;
+  padding: 10px;
+  font-weight: 600;
+}
+
+/* Liste des séjours hors règle à l'intérieur du bloc d'alerte : le texte
+   des motifs reste lisible, sans la graisse du titre. */
+.pt-alerte ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-weight: 400;
+}
+
+/* Tableau large (déplacements : 8 colonnes) : il défile horizontalement
+   dans son propre conteneur au lieu de faire déborder la page sur mobile. */
+.pt-table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pt-table-scroll .pt-table-recap { min-width: 640px; }
+
+/* Précision sous un chiffre d'indicateur (heures qui composent un ratio). */
+.pt-info-inline {
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--bfs-gris);
+}
+
+/* Ligne de déplacement qui déborde la règle dimanche-vendredi. */
+.pt-ligne-anomalie { background: #fdecea; }
+
+.pt-deplacement-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.pt-message-erreur {
+  background: #fdecea;
+  color: var(--bfs-rouge);
+  border: 1px solid var(--bfs-rouge);
+  border-radius: 6px;
+  padding: 12px;
+  margin: 16px;
+}
+
+.pt-info { color: var(--bfs-gris); }
+
+.pt-login {
+  max-width: 360px;
+  margin: 80px auto;
+  padding: 24px;
+  background: var(--bfs-blanc);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.pt-login h1 {
+  text-align: center;
+  color: var(--bfs-gris);
+  margin-bottom: 24px;
+}
+
+.pt-login form, .pt-form-manuel, .pt-form-activite {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pt-login label, .pt-form-manuel label, .pt-form-activite label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--bfs-gris);
+}
+
+.pt-login input, .pt-form-manuel input, .pt-form-manuel select,
+.pt-form-activite input, .pt-form-activite select {
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 1rem;
+}
+
+.pt-form-manuel { margin-top: 12px; }
+
+/* Détail des tâches saisi à la clôture d'un bloc de travail (pause
+   méridienne ou fin de journée). Le champ et le bouton "Ajouter" sur une
+   même ligne, la liste des tâches ajoutées en dessous. */
+.pt-tache-ajout {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.pt-tache-ajout input {
+  flex: 1;
+  min-width: 0; /* sans quoi le champ déborde de la carte sur petit écran */
+}
+
+.pt-tache-ajout .pt-btn { white-space: nowrap; }
+
+.pt-liste-taches {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.pt-liste-taches li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--bfs-gris-clair);
+}
+
+.pt-tache-retirer {
+  border: none;
+  background: none;
+  color: var(--bfs-rouge);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  /* Cible tactile confortable au pouce, sans agrandir la ligne. */
+  padding: 6px 10px;
+}
+
+.pt-nuitee-boutons {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+  flex-wrap: wrap;
+}
+
+.pt-liste-suivi {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+}
+
+.pt-jour-suivi {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--bfs-gris-clair);
+}
+
+.pt-jour-suivi-entete {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pt-jour-suivi-details {
+  font-size: 0.85rem;
+  color: var(--bfs-gris);
+  margin-top: 4px;
+}
+
+.pt-badge-ok {
+  background: #e6f4ea;
+  color: #1e7e34;
+}
+
+.pt-badge-alerte {
+  background: #fdecea;
+  color: var(--bfs-rouge);
+}
+
+.pt-suivi-onglets {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.pt-suivi-annee-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.pt-table-recap {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.pt-table-recap th, .pt-table-recap td {
+  text-align: right;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--bfs-gris-clair);
+}
+
+.pt-table-recap th:first-child, .pt-table-recap td:first-child {
+  text-align: left;
+}
+
+.pt-table-recap tfoot td,
+.pt-table-recap tfoot th {
+  border-top: 2px solid var(--bfs-gris);
+  border-bottom: none;
+}
+
+.pt-recap-mois-titre {
+  margin: 18px 0 6px;
+  color: var(--bfs-gris);
+}
+
+.pt-table-admin {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.pt-table-admin th, .pt-table-admin td {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--bfs-gris-clair);
+  vertical-align: middle;
+}
+
+.pt-table-admin select {
+  padding: 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.pt-admin-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.pt-signature-canvas {
+  width: 100%;
+  max-width: 400px;
+  height: 150px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: var(--bfs-blanc);
+  touch-action: none;
+  cursor: crosshair;
+}
+
+/* Lignes éditables (pointage/activité) dans Suivi > Jour par jour. */
+.pt-liste-editable {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0;
+}
+
+.pt-ligne-editable {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--bfs-gris-clair);
+}
+
+.pt-ligne-affichage {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.pt-ligne-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.pt-btn-icone {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.95rem;
+  padding: 2px 6px;
+  color: var(--bfs-gris);
+}
+
+.pt-btn-icone:hover {
+  color: var(--bfs-noir);
+}
+
+.pt-form-edition-ligne {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  margin-top: 6px;
+  padding: 8px;
+  background: var(--bfs-gris-clair);
+  border-radius: 6px;
+}
+
+.pt-form-edition-ligne label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--bfs-gris);
+}
+
+.pt-form-edition-ligne input,
+.pt-form-edition-ligne select {
+  padding: 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+
+
+/* Saisie numérique dans les écrans d'administration : coefficient de
+   classification (Profils) et seuils de statut (Paramètres). Largeur fixe
+   pour que la colonne ne s'étire pas, et cible tactile confortable. */
+.pt-profil-coefficient,
+.pt-parametre-nombre {
+  width: 6.5em;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.95rem;
+}
+
+.pt-profil-statut {
+  font-size: 0.85rem;
+  color: var(--bfs-gris);
+}
+
+/* Confirmation d'une action réussie — pendant de .pt-message-erreur. */
+.pt-message-succes {
+  background: #e6f4ea;
+  color: #1e7e34;
+  border: 1px solid #1e7e34;
+  border-radius: 6px;
+  padding: 12px;
+  margin: 16px 0;
+}
+
+/* En-tête : sur petit écran, nom + boutons passent à la ligne au lieu de
+   déborder. */
+.pt-header { flex-wrap: wrap; gap: 8px; }
+.pt-header-utilisateur { flex-wrap: wrap; }
