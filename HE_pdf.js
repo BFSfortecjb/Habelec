@@ -428,7 +428,7 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
           ? { content: texte, styles: { textColor: couleur, fontStyle: 'bold' } }
           : texte;
 
-        const fond = ev ? 'non applicable'
+        const fond = ev ? 'évaluation externe'
           : !d ? '—'
           : refFond === 0 ? 'aucune exigée'
           : cellule(`${d.fond_justes}/${refFond}`, d.fond_ok ? BFS.vert : BFS.rouge);
