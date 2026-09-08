@@ -730,14 +730,18 @@ async function genererTousLesQcm() {
 /* ---------------------- fiche stagiaire ---------------------------- */
 /* ---------- Envoi secrétariat : avis + preuve d'examen par email --------
  * Demande de Jeremy (2026-08-28) : un bouton sur le tableau de session
- * envoie, à la boîte mail dédiée du secrétariat (Lesli), l'avis
- * d'habilitation ET la preuve d'examen de chaque stagiaire ayant déjà un
- * titre généré — les PDF sont (re)construits ici même (jsPDF, mêmes
- * fonctions que les téléchargements individuels) puis transmis en base64 à
- * l'Edge Function habelec-envoyer-secretariat, qui se charge de l'envoi
- * SMTP (Gmail dédié). Convention de nommage demandée : chaque fichier
- * commence par le NOM du stagiaire, pour un tri alphabétique automatique
- * dans la boîte mail. */
+ * envoie, à l'adresse du secrétariat (configurée dans l'onglet Organisme —
+ * organismes.email_secretariat), l'avis d'habilitation ET la preuve
+ * d'examen de chaque stagiaire ayant déjà un titre généré — les PDF sont
+ * (re)construits ici même (jsPDF, mêmes fonctions que les téléchargements
+ * individuels) puis transmis en base64 à la fonction partagée Univers BFS
+ * envoyer-mail (pièces jointes supportées depuis sa v2, 2026-09-08), qui se
+ * charge de l'envoi SMTP (Gmail commun à toutes les briques BFS). Avant
+ * cette date, une Edge Function dédiée habelec-envoyer-secretariat existait
+ * mais a disparu du projet sans que le code ait été mis à jour — ce bouton
+ * était donc cassé jusqu'à ce correctif. Convention de nommage demandée :
+ * chaque fichier commence par le NOM du stagiaire, pour un tri alphabétique
+ * automatique dans la boîte mail. */
 /* ---------- ZIP global : tous les titres + toutes les preuves --------
  * (2026-09-04, demande de Jeremy) Sur le tableau général d'une session,
  * télécharge un seul fichier ZIP contenant l'avis d'habilitation ET la
@@ -821,6 +825,15 @@ async function telechargerZipTitres() {
 
 async function envoyerSecretariat() {
   const s = S.session;
+  // 2026-09-08 (service mail commun Univers BFS) : l'ancienne Edge Function
+  // habelec-envoyer-secretariat n'existe plus — l'envoi passe maintenant par
+  // la fonction partagée envoyer-mail (pièces jointes supportées depuis sa
+  // v2), avec le destinataire configuré dans l'onglet Organisme.
+  const emailSecretariat = (S.organisme?.email_secretariat || '').trim();
+  if (!emailSecretariat) {
+    return toast("Adresse email du secrétariat non configurée — renseigne-la dans l'onglet "
+      + 'Organisme avant d\'envoyer.', 'erreur', 7000);
+  }
   const { data: stagiaires } = await sb.from('stagiaires')
     .select('id, nom, prenom').eq('session_id', s.id).order('nom');
   const ids = (stagiaires || []).map(st => st.id);
@@ -880,16 +893,16 @@ async function envoyerSecretariat() {
 
     const nomsInclus = eligibles.filter(st => idsChoisis.includes(st.id) && !echecs.includes(st.id))
       .map(st => `${st.nom} ${st.prenom}`);
-    const objet = `Habilitation électrique — ${s.numero_session_galaxy || '—'}`;
-    const corps = `Bonjour,\n\nCi-joint l'avis d'habilitation et la preuve d'examen pour :\n`
+    const sujet = `Habilitation électrique — ${s.numero_session_galaxy || '—'}`;
+    const texte = `Bonjour,\n\nCi-joint l'avis d'habilitation et la preuve d'examen pour :\n`
       + nomsInclus.map(n => `  - ${n}`).join('\n')
       + `\n\nSession : ${s.intitule || ''} (n° Galaxy ${s.numero_session_galaxy || '—'})`
       + (echecs.length ? `\n\n${echecs.length} stagiaire(s) n'a/ont pas pu être inclus (erreur de génération).` : '')
       + '\n\n— Message généré automatiquement par Habelec.';
 
     try {
-      const { data, error } = await sb.functions.invoke('habelec-envoyer-secretariat', {
-        body: { objet, corps, pieces_jointes: piecesJointes },
+      const { data, error } = await sb.functions.invoke('envoyer-mail', {
+        body: { a: emailSecretariat, sujet, texte, pieces_jointes: piecesJointes },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
@@ -2152,6 +2165,13 @@ async function rendreOrganisme(zone) {
         </div>
         ${widgetImage('cachet-organisme-briec', o.cachet_data_briec)}
       </fieldset>
+      <fieldset><legend>Envoi secrétariat</legend>
+        <label>Adresse email du secrétariat <input name="email_secretariat" type="email"
+          value="${esc(o.email_secretariat)}" placeholder="ex : secretariat@bocage-securite.fr"></label>
+        <p class="aide">Adresse qui recevra l'avis d'habilitation + la preuve d'examen quand tu utilises
+          « Envoi secrétariat » depuis une session. Envoyé via le service mail commun Univers BFS
+          (bfs.noreplay@gmail.com) — pas de configuration supplémentaire nécessaire ici.</p>
+      </fieldset>
       <fieldset><legend>Questions fondamentales</legend>
         <label class="case"><input type="checkbox" name="fondamentales_actives" ${o.fondamentales_actives === false ? '' : 'checked'}>
           Activer les questions fondamentales (échec = titre non validé, badge affiché au stagiaire pendant l'examen)</label>
@@ -2201,6 +2221,7 @@ async function rendreOrganisme(zone) {
       cachet_data_briec: lireImage('cachet-organisme-briec'),
       drive_dossier_racine_id: f.drive_dossier_racine_id.value.trim() || null,
       fondamentales_actives: f.fondamentales_actives.checked,
+      email_secretariat: f.email_secretariat.value.trim() || null,
     };
     // La clé JSON ne se réaffiche jamais (juste un repère en placeholder) —
     // on ne réécrit donc la colonne que si l'utilisateur a effectivement
