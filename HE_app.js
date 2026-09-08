@@ -761,11 +761,20 @@ async function telechargerZipTitres() {
   // Éligible = théorie initiale corrigée (même convention que voirCopie /
   // suivi de session — statut 'corrigee' ou 'terminee') — qu'un titre existe
   // déjà ou non, genererTitrePdf le (re)génère dans les deux cas.
-  const { data: epreuves } = await sb.from('epreuves_theoriques')
-    .select('stagiaire_id, statut').in('stagiaire_id', ids).eq('type_epreuve', 'initiale');
+  // 2026-09-08 (bug remonté par Jeremy, session FSEFAC) : un stagiaire évalué
+  // par un formateur externe (evaluation_externe non nul) n'a JAMAIS de ligne
+  // epreuves_theoriques — il était donc toujours exclu du ZIP, silencieusement,
+  // même une fois son résultat externe saisi. On l'inclut maintenant aussi.
+  const [{ data: epreuves }, { data: stagiairesExternes }] = await Promise.all([
+    sb.from('epreuves_theoriques')
+      .select('stagiaire_id, statut').in('stagiaire_id', ids).eq('type_epreuve', 'initiale'),
+    sb.from('stagiaires')
+      .select('id').in('id', ids).not('evaluation_externe', 'is', null),
+  ]);
   const idsTheorieCorrigee = new Set((epreuves || [])
     .filter(e => e.statut === 'corrigee' || e.statut === 'terminee')
     .map(e => e.stagiaire_id));
+  (stagiairesExternes || []).forEach(st => idsTheorieCorrigee.add(st.id));
   const eligibles = stagiaires.filter(st => idsTheorieCorrigee.has(st.id));
   if (!eligibles.length) {
     return toast("Aucun stagiaire n'a de théorie corrigée pour l'instant — corrige les copies (👁) "
