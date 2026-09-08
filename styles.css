@@ -222,6 +222,8 @@ label.case input { width: auto; margin: 0; accent-color: var(--jaune); }
 
 
 /* ------------------------- copie corrigée -------------------------- */
+.passage-copie { border: 1px solid var(--gris-bord); border-radius: 8px; padding: 14px; margin-bottom: 18px; }
+.passage-copie h4 { margin: 0 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: .03em; color: var(--gris); }
 .bilan { padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 15px; }
 .bilan.ok { background: var(--vert-fond); color: var(--vert); border-left: 4px solid var(--vert); }
 .bilan.ko { background: var(--rouge-fond); color: var(--rouge); border-left: 4px solid var(--rouge); }

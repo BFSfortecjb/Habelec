@@ -133,7 +133,7 @@ function caseACocher(doc, x, y, cochee, taille = 3.2) {
  *     positionnée en bas exprès pour être découpée aux ciseaux après
  *     impression, sans toucher au reste du document qui sert de dossier
  *     employeur. */
-async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
+async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = false } = {}) {
   // Garde-fou (2026-08-28, demande de Jeremy) : impossible de générer le titre
   // tant qu'un titre en échec (avis defavorable) n'a pas de préconisation —
   // normalement déjà demandée en fermant la copie corrigée (voirCopie), ce
@@ -141,6 +141,19 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
   const { data: echecsSansPreconisation } = await sb.from('resultats_symbole')
     .select('symbole_code').eq('stagiaire_id', stagiaireId).eq('avis', 'defavorable').is('preconisation', null);
   if (echecsSansPreconisation?.length) {
+    // 2026-09-08 (demande de Jeremy, génération ZIP en masse) : ouvrir une
+    // modale de saisie pendant une boucle de génération en masse bloquerait
+    // (personne pour la remplir) — en mode silencieux on lève juste une
+    // erreur, que l'appelant (telechargerZipTitres) attrape par stagiaire
+    // sans interrompre les autres.
+    if (silencieux) {
+      let nomStagiaire = stagiaireId;
+      try {
+        const { data: stNom } = await sb.from('stagiaires').select('nom, prenom').eq('id', stagiaireId).single();
+        if (stNom) nomStagiaire = `${stNom.nom} ${stNom.prenom}`.trim();
+      } catch { /* tant pis, on garde l'id */ }
+      throw new Error('Préconisation manquante pour ' + nomStagiaire);
+    }
     toast('Préconisation obligatoire pour au moins un titre en échec — à saisir avant de générer le titre', 'erreur', 6000);
     return saisirPreconisations(stagiaireId);
   }
@@ -207,18 +220,29 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
   const epreuvePourGabarit = g => (epRattrapage
     && epRattrapage.statut === 'corrigee'
     && (epRattrapage.gabarits || []).includes(g)) ? epRattrapage : ep;
+  // 2026-09-08 (demande de Jeremy) : indique, pour chaque titre, si sa
+  // réussite théorique a été obtenue via le rattrapage (pour l'afficher
+  // "(rattrapage)" dans le détail par titre visé) — sans jamais réafficher le
+  // score initial en échec, seulement le fait qu'un rattrapage a eu lieu.
+  const viaRattrapage = Object.fromEntries(gabaritsVises.map(g => [g,
+    !!(epRattrapage && epRattrapage.statut === 'corrigee' && (epRattrapage.gabarits || []).includes(g))]));
   const [detailsTheorie, { data: pratiques }] = await Promise.all([
     Promise.all(gabaritsVises.map(g => {
       const epG = epreuvePourGabarit(g);
       return epG ? rpc('theorie_gabarit_detail', { p_epreuve_id: epG.id, p_gabarit_code: g }).catch(() => null) : null;
     })),
     gabaritsVises.length
-      ? sb.from('epreuves_pratiques').select('gabarit_code, reussie')
+      // 2026-09-08 (demande de Jeremy) : recommandation saisie par le
+      // formateur pendant l'évaluation pratique — fusionnée avec les
+      // préconisations théoriques dans la colonne Préconisation, voir plus bas.
+      ? sb.from('epreuves_pratiques').select('gabarit_code, reussie, recommandation')
           .eq('stagiaire_id', stagiaireId).in('gabarit_code', gabaritsVises)
       : Promise.resolve({ data: [] }),
   ]);
   const detailParGabarit = Object.fromEntries(gabaritsVises.map((g, i) => [g, detailsTheorie[i]]));
   const pratiqueParGabarit = Object.fromEntries((pratiques || []).map(p => [p.gabarit_code, p.reussie]));
+  const recommandationParGabarit = Object.fromEntries(
+    (pratiques || []).filter(p => p.recommandation).map(p => [p.gabarit_code, p.recommandation]));
 
   // 2026-09-03 (demande de Jeremy) : le nombre de fondamentales exigé par
   // titre n'est plus une somme normative (source de "7/4" incohérents) mais
@@ -388,22 +412,31 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true } = {}) {
         const libelleTitre = symbolesVises.length
           ? symbolesVises.map(libelleSymbole).join(' / ')
           : libelleGabarit(g); // repli si l'info symbole n'est pas disponible
+        // 2026-09-08 (demande de Jeremy) : "(rattrapage)" ajouté uniquement à
+        // l'affichage — libelleTitre reste inchangé pour les recherches de
+        // préconisation par symbole plus bas.
+        const libelleTitreAffiche = libelleTitre + (viaRattrapage[g] ? ' (rattrapage)' : '');
 
         // Couleur de la ligne entière (2026-08-27, demande de Jeremy) : vert si
         // titre entièrement validé (théorie + fondamentales + pratique), rouge
         // dès qu'un critère est raté, neutre tant que la pratique est en attente.
         const echoue = (d && !d.ok) || pratOk === false;
         const valide = d && d.ok && pratOk === true;
-        const intitule = echoue ? cellule(libelleTitre, BFS.rouge)
-          : valide ? cellule(libelleTitre, BFS.vert)
-          : libelleTitre;
+        const intitule = echoue ? cellule(libelleTitreAffiche, BFS.rouge)
+          : valide ? cellule(libelleTitreAffiche, BFS.vert)
+          : libelleTitreAffiche;
 
         // Préconisation du formateur (2026-08-28, demande de Jeremy) : saisie
         // à la main (voir "✏️" sur l'écran Session), affichée uniquement sur
         // les titres en échec — un titre non encore en échec (pratique en
         // attente) n'a par définition rien à préconiser pour l'instant.
+        // 2026-09-08 (demande de Jeremy) : fusionnée avec la recommandation
+        // saisie côté pratique (epreuves_pratiques.recommandation), qui était
+        // jusque-là silencieusement ignorée sur ce document.
+        const preconisationTheorie = symbolesVises.map(sym => preconisationParSymbole[sym]).filter(Boolean);
+        const preconisationPratique = recommandationParGabarit[g];
         const preconisation = echoue
-          ? (symbolesVises.map(sym => preconisationParSymbole[sym]).filter(Boolean).join(' ; ') || '—')
+          ? ([...preconisationTheorie, ...(preconisationPratique ? [preconisationPratique] : [])].join(' ; ') || '—')
           : '';
 
         return [intitule, theorie, fond, pratique, preconisation];
@@ -812,11 +845,16 @@ async function construireDocPreuveExamen(stagiaireId) {
   if (!st) throw new Error('Stagiaire introuvable');
   const symbolesStagiaire = (st.stagiaire_symboles || []).map(x => x.symbole_code);
 
-  const [{ data: session }, { data: ep }, { data: resultats }] = await Promise.all([
+  // 2026-09-08 (QCM de rattrapage) : jusqu'à 2 lignes par stagiaire —
+  // 'initiale' et, si généré, 'rattrapage' — comme sur l'avis/titre (voir
+  // genererTitrePdf). maybeSingle() plantait dès qu'un rattrapage existait.
+  const [{ data: session }, { data: epreuves }, { data: resultats }] = await Promise.all([
     sb.from('sessions_formation').select('*').eq('id', st.session_id).single(),
-    sb.from('epreuves_theoriques').select('*').eq('stagiaire_id', stagiaireId).maybeSingle(),
+    sb.from('epreuves_theoriques').select('*').eq('stagiaire_id', stagiaireId).in('type_epreuve', ['initiale', 'rattrapage']),
     sb.from('resultats_symbole').select('*').eq('stagiaire_id', stagiaireId),
   ]);
+  const ep = (epreuves || []).find(e => (e.type_epreuve || 'initiale') === 'initiale') || null;
+  const epRattrapage = (epreuves || []).find(e => e.type_epreuve === 'rattrapage') || null;
   const preconisationParSymbole = Object.fromEntries(
     (resultats || []).filter(r => r.preconisation).map(r => [r.symbole_code, r.preconisation]));
   const pratiqueOkParSymbole = Object.fromEntries((resultats || []).map(r => [r.symbole_code, r.pratique_ok]));
@@ -835,19 +873,33 @@ async function construireDocPreuveExamen(stagiaireId) {
       preconisation: preconisationParSymbole[sym] || null,
     }));
   } else {
-    const [detailsTheorie, { data: pratiques }] = await Promise.all([
+    // 2026-09-08 (demande de Jeremy) : la preuve d'examen doit lister LES
+    // DEUX passages (initial + rattrapage) avec leurs scores respectifs quand
+    // un rattrapage a eu lieu pour un titre — pas seulement le retenir en
+    // silence comme sur l'avis. On calcule donc le détail théorique pour
+    // l'épreuve initiale ET, si elle couvre le gabarit, pour le rattrapage.
+    const [detailsTheorie, detailsRattrapage, { data: pratiques }] = await Promise.all([
       Promise.all(gabaritsVises.map(g =>
-        rpc('theorie_gabarit_detail', { p_epreuve_id: ep.id, p_gabarit_code: g }).catch(() => null))),
+        ep ? rpc('theorie_gabarit_detail', { p_epreuve_id: ep.id, p_gabarit_code: g }).catch(() => null) : null)),
+      Promise.all(gabaritsVises.map(g =>
+        (epRattrapage && (epRattrapage.gabarits || []).includes(g))
+          ? rpc('theorie_gabarit_detail', { p_epreuve_id: epRattrapage.id, p_gabarit_code: g }).catch(() => null)
+          : null)),
       gabaritsVises.length
+        // 2026-09-08 (demande de Jeremy) : recommandation saisie côté pratique,
+        // fusionnée avec la préconisation théorique plus bas.
         ? sb.from('epreuves_pratiques')
-            .select(`gabarit_code, reussie, mises_en_situation(id, numero,
+            .select(`gabarit_code, reussie, recommandation, mises_en_situation(id, numero,
                        evaluations_savoir_faire(note,
                          gabarit_savoir_faire(position, criteres_savoir_faire(code, libelle))))`)
             .eq('stagiaire_id', stagiaireId).in('gabarit_code', gabaritsVises)
         : Promise.resolve({ data: [] }),
     ]);
     const detailParGabarit = Object.fromEntries(gabaritsVises.map((g, i) => [g, detailsTheorie[i]]));
+    const detailRattrapageParGabarit = Object.fromEntries(gabaritsVises.map((g, i) => [g, detailsRattrapage[i]]));
     const pratiqueParGabarit = Object.fromEntries((pratiques || []).map(p => [p.gabarit_code, p]));
+    const recommandationParGabarit = Object.fromEntries(
+      (pratiques || []).filter(p => p.recommandation).map(p => [p.gabarit_code, p.recommandation]));
 
     // 2026-09-03 (demande de Jeremy) : un titre décoché après coup (ex. via
     // "Modifier le stagiaire") ne doit plus apparaître sur la preuve d'examen
@@ -864,6 +916,11 @@ async function construireDocPreuveExamen(stagiaireId) {
       // pas d'un recalcul séparé à partir des quotas du référentiel qui pouvait
       // diverger (ex. tronc commun compté différemment selon les deux voies).
       const refFond = d?.fond_total || 0;
+      // 2026-09-08 (demande de Jeremy) : détail du passage de rattrapage pour
+      // ce titre, uniquement s'il a bien été corrigé — tant qu'il est en
+      // cours, seul le passage initial est affiché.
+      const dr = (epRattrapage && epRattrapage.statut === 'corrigee') ? detailRattrapageParGabarit[g] : null;
+      const refFondR = dr?.fond_total || 0;
       const symbolesVises = symbolesStagiaire
         .filter(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g));
       const libelleTitre = symbolesVises.map(libelleSymbole).join(' / ');
@@ -884,9 +941,14 @@ async function construireDocPreuveExamen(stagiaireId) {
         libelle: libelleTitre,
         theorie: d ? { texte: `${d.justes}/${d.total} (${d.taux} %)`, ok: d.ok,
           fond: refFond === 0 ? 'aucune exigée' : `${d.fond_justes}/${refFond}`, fondOk: d.fond_ok } : null,
+        theorieRattrapage: dr ? { texte: `${dr.justes}/${dr.total} (${dr.taux} %)`, ok: dr.ok,
+          fond: refFondR === 0 ? 'aucune exigée' : `${dr.fond_justes}/${refFondR}`, fondOk: dr.fond_ok } : null,
         pratique: items,
         pratiqueVerdict: p?.reussie,
-        preconisation: symbolesVises.map(sym => preconisationParSymbole[sym]).find(Boolean) || null,
+        preconisation: [
+          symbolesVises.map(sym => preconisationParSymbole[sym]).find(Boolean),
+          recommandationParGabarit[g],
+        ].filter(Boolean).join(' ; ') || null,
       };
     });
   }
@@ -937,9 +999,24 @@ async function construireDocPreuveExamen(stagiaireId) {
       { content: 'Résultat', styles: { halign: 'center' } },
       { content: 'Questions fondamentales', styles: { halign: 'center' } },
     ]],
+    // 2026-09-08 (demande de Jeremy) : quand un rattrapage a eu lieu pour ce
+    // titre, les DEUX passages sont affichés (initial puis rattrapage),
+    // clairement labellisés — la couleur/le verdict retenu est celui du
+    // rattrapage, seul à faire autorité.
     body: titresData.map(t => {
       const cellule = (texte, couleur) => couleur
         ? { content: texte, styles: { textColor: couleur, fontStyle: 'bold' } } : texte;
+      if (t.theorieRattrapage) {
+        const texteTheorie = `Passage initial : ${t.theorie ? t.theorie.texte : '—'}\n`
+          + `Rattrapage : ${t.theorieRattrapage.texte}`;
+        const texteFond = `Passage initial : ${t.theorie?.fond ?? '—'}\n`
+          + `Rattrapage : ${t.theorieRattrapage.fond}`;
+        return [
+          t.libelle,
+          cellule(texteTheorie, t.theorieRattrapage.ok ? BFS.vert : BFS.rouge),
+          cellule(texteFond, t.theorieRattrapage.fondOk ? BFS.vert : BFS.rouge),
+        ];
+      }
       return [
         t.libelle,
         t.theorie ? cellule(t.theorie.texte, t.theorie.ok ? BFS.vert : BFS.rouge) : '—',
@@ -1027,8 +1104,11 @@ async function construireDocPreuveExamen(stagiaireId) {
     y = doc.lastAutoTable.finalY + 4;
   }
 
-  // Bandeau final : nombre de titres validés (théorie ET pratique) sur le total.
-  const valides = titresData.filter(t => t.theorie?.ok && t.pratiqueVerdict === true).length;
+  // Bandeau final : nombre de titres validés (théorie ET pratique) sur le
+  // total — le résultat théorique retenu est celui du rattrapage quand il a
+  // eu lieu (2026-09-08, demande de Jeremy).
+  const valides = titresData.filter(t =>
+    (t.theorieRattrapage ? t.theorieRattrapage.ok : t.theorie?.ok) && t.pratiqueVerdict === true).length;
   const total = titresData.length;
   const [couleurBandeau, texteBandeau] = valides === total
     ? [BFS.vert, `${valides}/${total} TITRE(S) VALIDÉ(S)`]

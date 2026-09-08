@@ -746,6 +746,11 @@ async function genererTousLesQcm() {
  * secrétariat. Réutilise les mêmes générateurs PDF (sauvegarder: false)
  * que envoyerSecretariat, juste ci-dessous. Nécessite JSZip (voir index.html).
  */
+// 2026-09-08 (demande de Jeremy) : le ZIP ne se contente plus de re-zipper
+// les titres déjà générés — il génère en masse le titre de TOUT stagiaire
+// dont la théorie est corrigée mais qui n'a pas encore de titre (le bouton
+// individuel 🏅 reste inchangé pour une régénération au cas par cas, avec sa
+// modale de préconisation habituelle si besoin — voir genererTitrePdf).
 async function telechargerZipTitres() {
   const s = S.session;
   const { data: stagiaires } = await sb.from('stagiaires')
@@ -753,12 +758,17 @@ async function telechargerZipTitres() {
   const ids = (stagiaires || []).map(st => st.id);
   if (!ids.length) return toast('Aucun stagiaire dans cette session', 'erreur');
 
-  const { data: titres } = await sb.from('titres_habilitation')
-    .select('stagiaire_id').in('stagiaire_id', ids);
-  const idsAvecTitre = new Set((titres || []).map(t => t.stagiaire_id));
-  const eligibles = stagiaires.filter(st => idsAvecTitre.has(st.id));
+  // Éligible = théorie initiale corrigée (même convention que voirCopie /
+  // suivi de session — statut 'corrigee' ou 'terminee') — qu'un titre existe
+  // déjà ou non, genererTitrePdf le (re)génère dans les deux cas.
+  const { data: epreuves } = await sb.from('epreuves_theoriques')
+    .select('stagiaire_id, statut').in('stagiaire_id', ids).eq('type_epreuve', 'initiale');
+  const idsTheorieCorrigee = new Set((epreuves || [])
+    .filter(e => e.statut === 'corrigee' || e.statut === 'terminee')
+    .map(e => e.stagiaire_id));
+  const eligibles = stagiaires.filter(st => idsTheorieCorrigee.has(st.id));
   if (!eligibles.length) {
-    return toast("Aucun stagiaire n'a de titre généré pour l'instant — génère les titres (👁 puis 🏅) "
+    return toast("Aucun stagiaire n'a de théorie corrigée pour l'instant — corrige les copies (👁) "
       + 'avant de télécharger le ZIP.', 'erreur', 7000);
   }
 
@@ -769,15 +779,19 @@ async function telechargerZipTitres() {
   const echecs = [];
   for (const st of eligibles) {
     try {
-      const avis = await genererTitrePdf(st.id, { sauvegarder: false });
-      if (!avis?.doc) { echecs.push(st); continue; }
+      const avis = await genererTitrePdf(st.id, { sauvegarder: false, silencieux: true });
+      if (!avis?.doc) { echecs.push({ st, raison: 'génération sans document' }); continue; }
       const preuve = await genererPreuveExamenPdf(st.id, { sauvegarder: false });
       zip.file(avis.nomFichier, avis.doc.output('arraybuffer'));
       zip.file(preuve.nomFichier, preuve.doc.output('arraybuffer'));
     } catch (e) {
       DEBUG.erreur('telechargerZipTitres — génération PDF', e.message);
-      echecs.push(st);
+      echecs.push({ st, raison: e.message });
     }
+  }
+
+  if (!zip.files || !Object.keys(zip.files).length) {
+    return toast('Aucun document généré — voir le journal de debug', 'erreur');
   }
 
   const contenu = await zip.generateAsync({ type: 'blob' });
@@ -787,11 +801,12 @@ async function telechargerZipTitres() {
   lien.click();
   URL.revokeObjectURL(lien.href);
 
+  const genereCount = eligibles.length - echecs.length;
   if (echecs.length) {
-    toast(`ZIP téléchargé, mais ${echecs.length} dossier(s) en échec : `
-      + echecs.map(st => `${st.nom} ${st.prenom}`).join(', '), 'erreur', 8000);
+    toast(`ZIP généré pour ${genereCount} stagiaire(s). ${echecs.length} ignoré(s) : `
+      + echecs.map(({ st, raison }) => `${st.nom} ${st.prenom} (${raison})`).join(' ; '), 'erreur', 10000);
   } else {
-    toast('ZIP téléchargé');
+    toast(`ZIP généré pour ${genereCount} stagiaire(s)`);
   }
 }
 
@@ -1108,21 +1123,36 @@ function detailJournal(l) {
   return esc(JSON.stringify(d));
 }
 
+// 2026-09-08 (demande de Jeremy) : un stagiaire peut avoir passé un
+// rattrapage (type_epreuve = 'rattrapage', ne portant que les titres ratés
+// au premier passage — voir generer_qcm_rattrapage côté SQL). L'ancien
+// .maybeSingle() plantait dès qu'un rattrapage existait (2 lignes au lieu
+// d'une), affichant à tort "Aucun sujet généré pour ce stagiaire" alors que
+// les deux copies existaient bel et bien. On récupère les deux et on les
+// affiche l'une sous l'autre, chacune avec son propre bilan et son propre
+// détail de questions — rien n'est masqué ni fusionné.
 async function voirCopie(stagiaireId) {
-  const { data: ep } = await sb.from('epreuves_theoriques')
-    .select('*').eq('stagiaire_id', stagiaireId).maybeSingle();
-  if (!ep) return toast('Aucun sujet généré pour ce stagiaire', 'erreur');
+  const { data: eps } = await sb.from('epreuves_theoriques')
+    .select('*').eq('stagiaire_id', stagiaireId).in('type_epreuve', ['initiale', 'rattrapage']);
+  const epInit = (eps || []).find(e => e.type_epreuve === 'initiale');
+  const epRatt = (eps || []).find(e => e.type_epreuve === 'rattrapage');
+  if (!epInit) return toast('Aucun sujet généré pour ce stagiaire', 'erreur');
+  const passages = [epInit, epRatt].filter(Boolean);
+  const estCorrigee = e => e.statut === 'corrigee' || e.statut === 'terminee';
 
-  const { data: qs } = await sb.from('epreuve_questions')
-    .select('*, questions(numero, theme_code, symboles_cibles, enonce, explication, image_url, question_reponses(id, libelle, correcte)), reponses_stagiaire(reponses_ids, correcte)')
-    .eq('epreuve_id', ep.id).order('position');
+  const questionsParPassage = Object.fromEntries(await Promise.all(passages.map(async ep => {
+    const { data: qs } = await sb.from('epreuve_questions')
+      .select('*, questions(numero, theme_code, symboles_cibles, enonce, explication, image_url, question_reponses(id, libelle, correcte)), reponses_stagiaire(reponses_ids, correcte)')
+      .eq('epreuve_id', ep.id).order('position');
+    return [ep.id, qs || []];
+  })));
 
   // Préconisation obligatoire sur un titre en échec (2026-08-28, demande de
   // Jeremy) : demandée ici, au moment où le formateur valide la copie
   // corrigée — pas moyen de fermer cet écran sans l'avoir saisie pour
   // chaque titre non validé en théorie. Préremplie si déjà saisie
   // auparavant (ex. depuis "✏️" sur l'écran Session).
-  const [{ data: stPourPrecon }, { data: resultatsPourPrecon }] = ep.statut === 'corrigee' || ep.statut === 'terminee'
+  const [{ data: stPourPrecon }, { data: resultatsPourPrecon }] = passages.some(estCorrigee)
     ? await Promise.all([
         sb.from('stagiaires').select('id, stagiaire_symboles(symbole_code)').eq('id', stagiaireId).single(),
         sb.from('resultats_symbole').select('symbole_code, preconisation').eq('stagiaire_id', stagiaireId),
@@ -1131,114 +1161,139 @@ async function voirCopie(stagiaireId) {
   const symbolesStagiairePourPrecon = (stPourPrecon?.stagiaire_symboles || []).map(x => x.symbole_code);
   const preconisationParSymbole = Object.fromEntries((resultatsPourPrecon || []).map(r => [r.symbole_code, r.preconisation]));
 
-  // Détail par titre visé : le verdict global ci-dessus agrège tous les titres,
-  // mais un titre peut échouer seul sans invalider les autres (tronc commun vs
-  // thème propre à un titre — voir theorie_gabarit_ok côté SQL). On rejoue le
-  // même calcul par titre, et on repère les questions qui comptent pour chacun.
-  const gabaritsVises = ep.gabarits || [];
-  const verdictsParTitre = ep.statut === 'corrigee' || ep.statut === 'terminee'
-    ? Object.fromEntries(await Promise.all(gabaritsVises.map(async g =>
-        [g, await rpc('theorie_gabarit_ok', { p_epreuve_id: ep.id, p_gabarit_code: g })
+  // Détail par titre visé : le verdict global de chaque passage agrège tous
+  // ses titres, mais un titre peut échouer seul sans invalider les autres
+  // (tronc commun vs thème propre à un titre — voir theorie_gabarit_ok côté
+  // SQL). On rejoue le même calcul par titre, PAR PASSAGE.
+  const gabaritsVisesInit = epInit.gabarits || [];
+  const gabaritsVisesRatt = epRatt?.gabarits || [];
+  const verdictsInit = estCorrigee(epInit)
+    ? Object.fromEntries(await Promise.all(gabaritsVisesInit.map(async g =>
+        [g, await rpc('theorie_gabarit_ok', { p_epreuve_id: epInit.id, p_gabarit_code: g })
           .catch(e => { DEBUG.erreur('theorie_gabarit_ok — ' + g, e.message); return null; })])))
     : {};
-  if (ep.statut !== 'corrigee' && ep.statut !== 'terminee') {
-    DEBUG.info('voirCopie — détail par titre non calculé, statut de l\'épreuve : ' + ep.statut);
-  }
+  const verdictsRatt = epRatt && estCorrigee(epRatt)
+    ? Object.fromEntries(await Promise.all(gabaritsVisesRatt.map(async g =>
+        [g, await rpc('theorie_gabarit_ok', { p_epreuve_id: epRatt.id, p_gabarit_code: g })
+          .catch(e => { DEBUG.erreur('theorie_gabarit_ok — ' + g, e.message); return null; })])))
+    : {};
+  // Verdict FINAL par titre visé, même règle que calculer_resultats() côté
+  // SQL : le rattrapage l'emporte pour les titres qu'il couvre, dès lors
+  // qu'il est corrigé — sinon on retombe sur le passage initial. Sert
+  // uniquement à décider quels titres exigent encore une préconisation.
+  const verdictFinalParTitre = Object.fromEntries(gabaritsVisesInit.map(g => [g,
+    (epRatt && estCorrigee(epRatt) && gabaritsVisesRatt.includes(g)) ? verdictsRatt[g] : verdictsInit[g]]));
+
   // Pour chaque titre visé, les thèmes qui comptent dans son quota (tronc commun compris)
-  const themesParTitre = Object.fromEntries(gabaritsVises.map(g =>
+  const themesParTitre = Object.fromEntries(gabaritsVisesInit.map(g =>
     [g, new Set(S.referentiel.quotas.filter(q => q.gabarit_code === g && q.nb > 0).map(q => q.theme_code))]));
 
+  const rendreQuestion = (q, ep) => {
+    const donnees = q.reponses_stagiaire?.reponses_ids || [];
+    const juste = q.reponses_stagiaire?.correcte;
+    // 2026-09-05 (demande de Jeremy) : le bouton "Saisir la réponse à sa
+    // place" ne doit pas dépendre juste d'un tableau vide, mais du fait
+    // qu'AUCUN des ids enregistrés ne correspond à une proposition
+    // actuelle de la question — sinon une réponse devenue orpheline (ex.
+    // options d'une question modifiées depuis) s'affiche à l'écran comme
+    // "toutes les cases décochées" sans que le bouton de re-saisie
+    // n'apparaisse pour autant.
+    const idsPropositionsValides = new Set(q.questions.question_reponses.map(r => r.id));
+    const auMoinsUneReponseValide = donnees.some(id => idsPropositionsValides.has(id));
+    const sansReponse = !auMoinsUneReponseValide;
+    const gabaritsPassage = ep.gabarits || [];
+    const titresConcernes = gabaritsPassage.filter(g => themesParTitre[g]?.has(q.theme_code));
+    const editionReponse = EDITION_COPIE.reponses.has(q.id);
+    const editionCle = EDITION_COPIE.cles.has(q.question_id);
+    return `<li class="${sansReponse ? '' : juste ? 'juste' : 'faux'}">
+      <div class="enonce">
+        <span class="puce" title="Numéro de la question">${esc(codeAffiche(q.questions))}</span>
+        ${esc(q.questions.enonce)}
+        ${q.fondamentale ? '<span class="puce fond">fondamentale</span>' : ''}
+        ${sansReponse ? '<span class="puce alerte">sans réponse</span>' : ''}
+        ${titresConcernes.map(g => `<span class="puce" title="Compte pour ce titre">${esc(libelleGabarit(g))}</span>`).join('')}
+      </div>
+      ${q.questions.image_url ? `<img class="vignette-question" src="${esc(q.questions.image_url)}" alt="">` : ''}
+      <ul>${q.questions.question_reponses.map(r => `
+        <li class="${r.correcte ? 'bonne' : ''} ${donnees.includes(r.id) ? 'cochee' : ''}">
+          ${donnees.includes(r.id) ? '☑' : '☐'} ${esc(r.libelle)}</li>`).join('')}</ul>
+      ${q.questions.explication ? `<p class="explication">${esc(q.questions.explication)}</p>` : ''}
+
+      <div class="actions-recorrection">
+        ${sansReponse ? `<button type="button" class="lien" onclick="toggleReponseFormateur('${q.id}', '${stagiaireId}')">
+          ${editionReponse ? 'Annuler la saisie' : '✎ Saisir la réponse à sa place'}</button>` : ''}
+        <button type="button" class="lien" onclick="toggleCorrectionCle('${q.question_id}', '${stagiaireId}')">
+          ${editionCle ? 'Annuler la correction' : '⚠ Cette question est erronée'}</button>
+      </div>
+
+      ${editionReponse ? `<div class="recorrection" id="rf-${q.id}">
+        <p class="aide">Coche la ou les réponses que le stagiaire aurait dû donner.</p>
+        ${q.questions.question_reponses.map(r => `
+          <label class="case"><input type="${q.questions.choix_multiple ? 'checkbox' : 'radio'}"
+            name="rf-${q.id}" value="${r.id}"> ${esc(r.libelle)}</label>`).join('')}
+        <button type="button" class="principal" onclick="enregistrerReponseFormateur('${q.id}', '${stagiaireId}')">Enregistrer</button>
+      </div>` : ''}
+
+      ${editionCle ? `<div class="recorrection" id="cc-${q.question_id}">
+        <p class="aide alerte">Coche la ou les VRAIES bonnes réponses. S'applique à toutes les copies
+          déjà corrigées contenant cette question, dans tout l'organisme — recalcul automatique.</p>
+        ${q.questions.question_reponses.map(r => `
+          <label class="case"><input type="checkbox" name="cc-${q.question_id}" value="${r.id}"
+            ${r.correcte ? 'checked' : ''}> ${esc(r.libelle)}</label>`).join('')}
+        <button type="button" class="principal" onclick="enregistrerCorrectionCle('${q.question_id}', '${stagiaireId}')">Corriger la clé</button>
+      </div>` : ''}
+    </li>`;
+  };
+
+  const rendrePassage = (ep, titrePassage) => {
+    const gabaritsPassage = ep.gabarits || [];
+    const verdicts = ep === epInit ? verdictsInit : verdictsRatt;
+    return `<div class="passage-copie">
+      <h4>${esc(titrePassage)}</h4>
+      <div class="bilan ${ep.reussie ? 'ok' : 'ko'}">
+        ${ep.score_brut}/${ep.score_total} — ${Math.round((ep.taux || 0) * 100)} %
+        · questions fondamentales : ${ep.fondamentales_ok ? 'toutes justes' : 'au moins une ratée'}
+        · <b>${ep.reussie ? 'ADMIS' : 'NON ADMIS'}</b>
+      </div>
+      ${gabaritsPassage.length ? `<div class="detail-titres">
+        <b>Détail par titre visé</b>
+        <ul>${gabaritsPassage.map(g => {
+          const ok = verdicts[g];
+          return `<li class="${ok === true ? 'juste' : ok === false ? 'faux' : ''}">
+            <span class="puce ${ok === true ? 'titre-vert-fonce' : ok === false ? 'titre-rouge' : ''}">
+              ${esc(libelleGabarit(g))}</span>
+            ${ok === true ? '✔ validé' : ok === false ? '✘ non validé' : 'en attente'}</li>`;
+        }).join('')}</ul>
+      </div>` : ''}
+      <ol class="copie">${(questionsParPassage[ep.id] || []).map(q => rendreQuestion(q, ep)).join('')}</ol>
+    </div>`;
+  };
+
+  const preconisationHtml = (() => {
+    // Titres en échec au verdict FINAL (rattrapage compris) : préconisation
+    // obligatoire avant de pouvoir fermer cette copie. On regroupe par
+    // gabarit et on écrit le même texte sur chaque symbole visé rattaché à
+    // ce gabarit (c'est là que preconisation est stockée).
+    const gabaritsEnEchec = gabaritsVisesInit.filter(g => verdictFinalParTitre[g] === false);
+    if (!gabaritsEnEchec.length) return '';
+    const mapping = Object.fromEntries(gabaritsEnEchec.map(g => [g,
+      symbolesStagiairePourPrecon.filter(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g))]));
+    return `<div class="detail-titres precon-requise" id="precon-obligatoire" data-mapping='${esc(JSON.stringify(mapping))}'>
+      <b>Préconisation (obligatoire pour valider un titre en échec)</b>
+      <p class="aide">Ce texte s'affichera sur l'avis d'habilitation, dans le tableau "Détail par titre visé".</p>
+      ${gabaritsEnEchec.map(g => {
+        const symboles = mapping[g];
+        const texteExistant = symboles.map(sym => preconisationParSymbole[sym]).find(Boolean) || '';
+        return `<label>${esc(libelleGabarit(g))}
+          <textarea id="precon-${g}" rows="2" required placeholder="Préconisation…">${esc(texteExistant)}</textarea></label>`;
+      }).join('')}
+    </div>`;
+  })();
+
   ouvrirModale('Copie corrigée', `
-    <div class="bilan ${ep.reussie ? 'ok' : 'ko'}">
-      ${ep.score_brut}/${ep.score_total} — ${Math.round((ep.taux || 0) * 100)} %
-      · questions fondamentales : ${ep.fondamentales_ok ? 'toutes justes' : 'au moins une ratée'}
-      · <b>${ep.reussie ? 'ADMIS' : 'NON ADMIS'}</b>
-    </div>
-    ${gabaritsVises.length ? `<div class="detail-titres">
-      <b>Détail par titre visé</b>
-      <ul>${gabaritsVises.map(g => {
-        const ok = verdictsParTitre[g];
-        return `<li class="${ok === true ? 'juste' : ok === false ? 'faux' : ''}">
-          <span class="puce ${ok === true ? 'titre-vert-fonce' : ok === false ? 'titre-rouge' : ''}">
-            ${esc(libelleGabarit(g))}</span>
-          ${ok === true ? '✔ validé' : ok === false ? '✘ non validé' : 'en attente'}</li>`;
-      }).join('')}</ul>
-    </div>` : ''}
-    ${(() => {
-      // Titres en échec théorique (verdictsParTitre[g] === false) : préconisation
-      // obligatoire avant de pouvoir fermer cette copie. On regroupe par gabarit
-      // (comme la liste ci-dessus) mais on écrit le même texte sur chaque symbole
-      // visé rattaché à ce gabarit (c'est là que preconisation est stockée).
-      const gabaritsEnEchec = gabaritsVises.filter(g => verdictsParTitre[g] === false);
-      if (!gabaritsEnEchec.length) return '';
-      const mapping = Object.fromEntries(gabaritsEnEchec.map(g => [g,
-        symbolesStagiairePourPrecon.filter(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g))]));
-      return `<div class="detail-titres precon-requise" id="precon-obligatoire" data-mapping='${esc(JSON.stringify(mapping))}'>
-        <b>Préconisation (obligatoire pour valider un titre en échec)</b>
-        <p class="aide">Ce texte s'affichera sur l'avis d'habilitation, dans le tableau "Détail par titre visé".</p>
-        ${gabaritsEnEchec.map(g => {
-          const symboles = mapping[g];
-          const texteExistant = symboles.map(sym => preconisationParSymbole[sym]).find(Boolean) || '';
-          return `<label>${esc(libelleGabarit(g))}
-            <textarea id="precon-${g}" rows="2" required placeholder="Préconisation…">${esc(texteExistant)}</textarea></label>`;
-        }).join('')}
-      </div>`;
-    })()}
-    <ol class="copie">${(qs || []).map(q => {
-      const donnees = q.reponses_stagiaire?.reponses_ids || [];
-      const juste = q.reponses_stagiaire?.correcte;
-      // 2026-09-05 (demande de Jeremy) : le bouton "Saisir la réponse à sa
-      // place" ne doit pas dépendre juste d'un tableau vide, mais du fait
-      // qu'AUCUN des ids enregistrés ne correspond à une proposition
-      // actuelle de la question — sinon une réponse devenue orpheline (ex.
-      // options d'une question modifiées depuis) s'affiche à l'écran comme
-      // "toutes les cases décochées" sans que le bouton de re-saisie
-      // n'apparaisse pour autant.
-      const idsPropositionsValides = new Set(q.questions.question_reponses.map(r => r.id));
-      const auMoinsUneReponseValide = donnees.some(id => idsPropositionsValides.has(id));
-      const sansReponse = !auMoinsUneReponseValide;
-      const titresConcernes = gabaritsVises.filter(g => themesParTitre[g]?.has(q.theme_code));
-      const editionReponse = EDITION_COPIE.reponses.has(q.id);
-      const editionCle = EDITION_COPIE.cles.has(q.question_id);
-      return `<li class="${sansReponse ? '' : juste ? 'juste' : 'faux'}">
-        <div class="enonce">
-          <span class="puce" title="Numéro de la question">${esc(codeAffiche(q.questions))}</span>
-          ${esc(q.questions.enonce)}
-          ${q.fondamentale ? '<span class="puce fond">fondamentale</span>' : ''}
-          ${sansReponse ? '<span class="puce alerte">sans réponse</span>' : ''}
-          ${titresConcernes.map(g => `<span class="puce" title="Compte pour ce titre">${esc(libelleGabarit(g))}</span>`).join('')}
-        </div>
-        ${q.questions.image_url ? `<img class="vignette-question" src="${esc(q.questions.image_url)}" alt="">` : ''}
-        <ul>${q.questions.question_reponses.map(r => `
-          <li class="${r.correcte ? 'bonne' : ''} ${donnees.includes(r.id) ? 'cochee' : ''}">
-            ${donnees.includes(r.id) ? '☑' : '☐'} ${esc(r.libelle)}</li>`).join('')}</ul>
-        ${q.questions.explication ? `<p class="explication">${esc(q.questions.explication)}</p>` : ''}
-
-        <div class="actions-recorrection">
-          ${sansReponse ? `<button type="button" class="lien" onclick="toggleReponseFormateur('${q.id}', '${stagiaireId}')">
-            ${editionReponse ? 'Annuler la saisie' : '✎ Saisir la réponse à sa place'}</button>` : ''}
-          <button type="button" class="lien" onclick="toggleCorrectionCle('${q.question_id}', '${stagiaireId}')">
-            ${editionCle ? 'Annuler la correction' : '⚠ Cette question est erronée'}</button>
-        </div>
-
-        ${editionReponse ? `<div class="recorrection" id="rf-${q.id}">
-          <p class="aide">Coche la ou les réponses que le stagiaire aurait dû donner.</p>
-          ${q.questions.question_reponses.map(r => `
-            <label class="case"><input type="${q.questions.choix_multiple ? 'checkbox' : 'radio'}"
-              name="rf-${q.id}" value="${r.id}"> ${esc(r.libelle)}</label>`).join('')}
-          <button type="button" class="principal" onclick="enregistrerReponseFormateur('${q.id}', '${stagiaireId}')">Enregistrer</button>
-        </div>` : ''}
-
-        ${editionCle ? `<div class="recorrection" id="cc-${q.question_id}">
-          <p class="aide alerte">Coche la ou les VRAIES bonnes réponses. S'applique à toutes les copies
-            déjà corrigées contenant cette question, dans tout l'organisme — recalcul automatique.</p>
-          ${q.questions.question_reponses.map(r => `
-            <label class="case"><input type="checkbox" name="cc-${q.question_id}" value="${r.id}"
-              ${r.correcte ? 'checked' : ''}> ${esc(r.libelle)}</label>`).join('')}
-          <button type="button" class="principal" onclick="enregistrerCorrectionCle('${q.question_id}', '${stagiaireId}')">Corriger la clé</button>
-        </div>` : ''}
-      </li>`;
-    }).join('')}</ol>
+    ${rendrePassage(epInit, 'Passage initial')}
+    ${epRatt ? rendrePassage(epRatt, `Rattrapage — titre(s) repassé(s) : ${(epRatt.gabarits || []).map(libelleGabarit).join(', ')}`) : ''}
+    ${preconisationHtml}
     <div class="pied-modale">
       <button class="lien" onclick="voirJournalSession('${S.session.id}')">🗂 Journal des interventions</button>
       <button onclick="fermerCopieCorrigee('${stagiaireId}')">Fermer</button>
