@@ -2371,7 +2371,7 @@ function exporterTitresVerification() {
 async function rendreComptes(zone) {
   zone.innerHTML = '<p class="chargement">Chargement des comptes…</p>';
   const [{ data: formateurs, error: err1 }, { data: organismes, error: err2 }, comptesDisponibles] = await Promise.all([
-    sb.from('formateurs').select('*, organismes(raison_sociale)').order('email'),
+    sb.from('formateurs').select('*, organismes(raison_sociale)').order('email'), // inclut organisme_externe (select *)
     sb.from('organismes').select('id, raison_sociale').order('raison_sociale'),
     // Comptes de tout l'Univers BFS pas encore rattachés à Habelec (2026-08-27,
     // demande de Jeremy) — pour le menu déroulant, évite la saisie manuelle.
@@ -2401,6 +2401,7 @@ async function rendreComptes(zone) {
         <label>Rôle
           <select name="role">
             <option value="formateur">Formateur</option>
+            <option value="secretariat">Secrétariat</option>
             <option value="admin">Administrateur</option>
           </select></label>
         <label>Nom <input name="nom"></label>
@@ -2409,7 +2410,10 @@ async function rendreComptes(zone) {
           <select name="organisme_id">
             <option value="">— aucun —</option>
             ${optionsOrganisme}
+            <option value="__externe__">Organisme extérieur (préciser)…</option>
           </select></label>
+        <label class="champ-organisme-externe" hidden>Nom de l'organisme extérieur
+          <input name="organisme_externe" autocomplete="off"></label>
       </div>
       <button class="principal" type="submit">Rattacher</button>
     </form>
@@ -2425,6 +2429,7 @@ async function rendreComptes(zone) {
         <label>Rôle
           <select name="role">
             <option value="formateur">Formateur</option>
+            <option value="secretariat">Secrétariat</option>
             <option value="admin">Administrateur</option>
           </select></label>
         <label>Nom <input name="nom" required></label>
@@ -2433,7 +2438,10 @@ async function rendreComptes(zone) {
           <select name="organisme_id">
             <option value="">— aucun —</option>
             ${optionsOrganisme}
+            <option value="__externe__">Organisme extérieur (préciser)…</option>
           </select></label>
+        <label class="champ-organisme-externe" hidden>Nom de l'organisme extérieur
+          <input name="organisme_externe" autocomplete="off"></label>
       </div>
       <button class="principal" type="submit">Créer le compte et l'inviter</button>
     </form>
@@ -2444,8 +2452,8 @@ async function rendreComptes(zone) {
         <tr>
           <td>${esc(f.email)}</td>
           <td>${esc([f.prenom, f.nom].filter(Boolean).join(' '))}</td>
-          <td>${f.role === 'admin' ? 'Administrateur' : 'Formateur'}</td>
-          <td>${esc(f.organismes?.raison_sociale || '—')}</td>
+          <td>${f.role === 'admin' ? 'Administrateur' : f.role === 'secretariat' ? 'Secrétariat' : 'Formateur'}</td>
+          <td>${esc(f.organismes?.raison_sociale || f.organisme_externe || '—')}</td>
           <td>${dateFr(f.cree_le)}</td>
         </tr>`).join('') || '<tr><td colspan="5" class="vide">Aucun compte rattaché pour le moment.</td></tr>'}
       </tbody>
@@ -2455,17 +2463,32 @@ async function rendreComptes(zone) {
     if (ev.target.value) $('#form-rattacher-compte input[name="email"]').value = ev.target.value;
   });
 
+  // Affiche le champ « nom de l'organisme extérieur » uniquement quand ce
+  // choix est sélectionné, sur les deux formulaires (2026-09-08).
+  $$('select[name="organisme_id"]').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const champ = sel.closest('form').querySelector('.champ-organisme-externe');
+      champ.hidden = sel.value !== '__externe__';
+      if (sel.value !== '__externe__') champ.querySelector('input').value = '';
+    });
+  });
+
   $('#form-rattacher-compte').addEventListener('submit', async ev => {
     ev.preventDefault();
     const f = ev.target;
     const email = f.email.value.trim();
+    const organismeExterne = f.organisme_id.value === '__externe__' ? f.organisme_externe.value.trim() : '';
+    if (f.organisme_id.value === '__externe__' && !organismeExterne) {
+      return toast("Indique le nom de l'organisme extérieur, ou choisis « — aucun — »", 'erreur');
+    }
     try {
       const [resultat] = await rpc('rattacher_formateur_par_email', {
-        p_email:        email,
-        p_nom:          f.nom.value.trim() || null,
-        p_prenom:       f.prenom.value.trim() || null,
-        p_role:         f.role.value,
-        p_organisme_id: f.organisme_id.value || null,
+        p_email:              email,
+        p_nom:                f.nom.value.trim() || null,
+        p_prenom:             f.prenom.value.trim() || null,
+        p_role:               f.role.value,
+        p_organisme_id:       f.organisme_id.value === '__externe__' ? null : (f.organisme_id.value || null),
+        p_organisme_externe:  organismeExterne || null,
       });
       toast(resultat.deja_existant
         ? `${email} était déjà rattaché à Habelec — rien n'a été modifié`
@@ -2479,6 +2502,10 @@ async function rendreComptes(zone) {
     ev.preventDefault();
     const f = ev.target;
     const email = f.email.value.trim();
+    const organismeExterne = f.organisme_id.value === '__externe__' ? f.organisme_externe.value.trim() : '';
+    if (f.organisme_id.value === '__externe__' && !organismeExterne) {
+      return toast("Indique le nom de l'organisme extérieur, ou choisis « — aucun — »", 'erreur');
+    }
     const bouton = f.querySelector('button');
     bouton.disabled = true;
     try {
@@ -2487,10 +2514,11 @@ async function rendreComptes(zone) {
       const { data, error } = await sb.functions.invoke('habelec-creer-formateur-externe', {
         body: {
           email,
-          nom:           f.nom.value.trim(),
-          prenom:        f.prenom.value.trim() || null,
-          role:          f.role.value,
-          organisme_id:  f.organisme_id.value || null,
+          nom:               f.nom.value.trim(),
+          prenom:            f.prenom.value.trim() || null,
+          role:              f.role.value,
+          organisme_id:      f.organisme_id.value === '__externe__' ? null : (f.organisme_id.value || null),
+          organisme_externe: organismeExterne || null,
         },
       });
       if (error) throw new Error(data?.error || error.message);
