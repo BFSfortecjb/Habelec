@@ -184,6 +184,9 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
   // pour D.3.1.11) alors qu'un seul des deux a été visé. Éviter l'incohérence
   // avec le tableau Annexe C du titre lui-même, qui ne liste que le symbole réel.
   const symbolesStagiaire = (st.stagiaire_symboles || []).map(x => x.symbole_code);
+  // 2026-09-08 (demande de Jeremy) : déclarée ici (avant gabaritsVises, qui
+  // en a besoin) plutôt que juste avant son premier usage plus bas.
+  const ev = st.evaluation_externe || null;
   const [{ data: session }, { data: epreuves }, { data: resultatsSymbole }] = await Promise.all([
     sb.from('sessions_formation').select('*').eq('id', st.session_id).single(),
     // 2026-09-03 (QCM de rattrapage) : jusqu'à 2 lignes par stagiaire —
@@ -194,12 +197,24 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
     sb.from('epreuves_theoriques').select('*').eq('stagiaire_id', stagiaireId),
     // Préconisations du formateur (2026-08-28, demande de Jeremy) : saisies à la main,
     // affichées dans "Détail par titre visé" sur les lignes en échec — voir plus bas.
-    sb.from('resultats_symbole').select('symbole_code, preconisation').eq('stagiaire_id', stagiaireId),
+    // theorie_ok/pratique_ok également sélectionnés (2026-09-08, demande de
+    // Jeremy) : pour un stagiaire évalué par un formateur externe (voir plus
+    // bas, const ev), resultats_symbole est la SEULE source fiable de ces
+    // deux résultats par titre — il n'y a ni epreuves_theoriques (ep) ni
+    // epreuves_pratiques pour ce stagiaire.
+    sb.from('resultats_symbole').select('symbole_code, preconisation, theorie_ok, pratique_ok').eq('stagiaire_id', stagiaireId),
   ]);
   const ep = (epreuves || []).find(e => (e.type_epreuve || 'initiale') === 'initiale') || null;
   const epRattrapage = (epreuves || []).find(e => e.type_epreuve === 'rattrapage') || null;
   const preconisationParSymbole = Object.fromEntries(
     (resultatsSymbole || []).filter(r => r.preconisation).map(r => [r.symbole_code, r.preconisation]));
+  // 2026-09-08 (demande de Jeremy) : pour une évaluation externe, theorie_ok
+  // et pratique_ok par symbole (resultats_symbole) servent à reconstituer le
+  // détail par titre visé — voir gabaritsVises / detailParGabarit plus bas.
+  const theorieOkParSymbole = Object.fromEntries(
+    (resultatsSymbole || []).map(r => [r.symbole_code, r.theorie_ok]));
+  const pratiqueOkParSymbole = Object.fromEntries(
+    (resultatsSymbole || []).map(r => [r.symbole_code, r.pratique_ok]));
   const org = S.organisme || {};
   const c = titre.contenu || {};
   const lignes = c.lignes || {};
@@ -213,7 +228,15 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
   // (tronc commun + thèmes propres au gabarit) — sert à justifier sur le
   // document la réussite ou l'échec de l'évaluation théorique, plus le
   // résultat de l'épreuve pratique du même titre. Demande de Jeremy.
-  const gabaritsVises = ep?.gabarits || [];
+  // 2026-09-08 (demande de Jeremy) : pour une évaluation externe (ev
+  // non nul), il n'existe aucune ligne epreuves_theoriques — ep est null et
+  // ep?.gabarits est donc toujours vide, ce qui faisait disparaître
+  // silencieusement tout le détail par titre visé (théorie/pratique/
+  // préconisation), y compris les titres en échec pratique. On reconstitue
+  // alors la liste des gabarits visés à partir des symboles du stagiaire.
+  const gabaritsVises = ev
+    ? [...new Set(symbolesStagiaire.flatMap(sym => S.referentiel.gabaritsParSymbole[sym] || []))]
+    : (ep?.gabarits || []);
   // Le rattrapage ne fait autorité pour un titre que s'il a effectivement
   // été corrigé — tant qu'il est en cours, l'avis continue de refléter le
   // premier passage pour ce titre.
@@ -321,10 +344,8 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
   // pas d'épreuve théorique Habelec (ep est null) — on affiche alors le
   // résultat saisi manuellement (note/total/taux) et le nom du formateur
   // externe à la place, avec une observation explicite sur l'origine du
-  // résultat. La table "Détail par titre visé" plus bas reste simplement
-  // absente pour ces stagiaires (gabaritsVises est vide sans ep), sans
-  // aucune modification nécessaire de cette partie du code.
-  const ev = st.evaluation_externe || null;
+  // résultat. (const ev déclarée plus haut, avant gabaritsVises qui en a
+  // besoin — voir 2026-09-08 plus haut.)
   const resultatTheorique = ev
     ? `${ev.note ?? '—'}/${ev.total ?? '—'}${ev.taux != null ? ` (${ev.taux} %)` : ''}`
     : (ep && ep.score_total
@@ -385,8 +406,20 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
       body: gabaritsVises.filter(g => symbolesStagiaire
         .some(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g))
       ).map(g => {
+        const symbolesVises = symbolesStagiaire
+          .filter(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g));
         const d = detailParGabarit[g];
-        const pratOk = pratiqueParGabarit[g];
+        // 2026-09-08 (demande de Jeremy) : pour une évaluation externe, il
+        // n'y a ni theorie_gabarit_detail() (d) ni ligne epreuves_pratiques
+        // (pratiqueParGabarit) — pratOk vient alors de resultats_symbole,
+        // seule source à jour pour ce stagiaire (voir aussi calculer_resultats,
+        // corrigé en base le même jour pour ne plus l'écraser).
+        const pratOk = ev
+          ? symbolesVises.map(sym => pratiqueOkParSymbole[sym]).find(v => v !== undefined)
+          : pratiqueParGabarit[g];
+        const theorieOkExterne = ev
+          ? symbolesVises.map(sym => theorieOkParSymbole[sym]).find(v => v !== undefined)
+          : undefined;
         const refFond = d?.fond_total || 0;
         // Score chiffré (ex: 2/2) plutôt qu'un texte "toutes justes / insuffisant"
         // (demande de Jeremy, 2026-08-27) — requis et score viennent tous les
@@ -395,11 +428,20 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
           ? { content: texte, styles: { textColor: couleur, fontStyle: 'bold' } }
           : texte;
 
-        const fond = !d ? '—'
+        const fond = ev ? 'non applicable'
+          : !d ? '—'
           : refFond === 0 ? 'aucune exigée'
           : cellule(`${d.fond_justes}/${refFond}`, d.fond_ok ? BFS.vert : BFS.rouge);
 
-        const theorie = d
+        // 2026-09-08 (demande de Jeremy) : théorie affichée comme "validée" /
+        // "non validée" (pas de score chiffré par titre, une évaluation
+        // externe ne donne qu'un résultat global) plutôt que "—", qui laissait
+        // croire que la théorie n'avait jamais été évaluée.
+        const theorie = ev
+          ? (theorieOkExterne === true ? cellule('validée (externe)', BFS.vert)
+            : theorieOkExterne === false ? cellule('non validée (externe)', BFS.rouge)
+            : '—')
+          : d
           ? cellule(`${d.justes}/${d.total} (${d.taux} %)`, d.ok ? BFS.vert : BFS.rouge)
           : '—';
 
@@ -407,8 +449,6 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
           : pratOk === false ? cellule('non validée', BFS.rouge)
           : 'en attente';
 
-        const symbolesVises = symbolesStagiaire
-          .filter(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g));
         const libelleTitre = symbolesVises.length
           ? symbolesVises.map(libelleSymbole).join(' / ')
           : libelleGabarit(g); // repli si l'info symbole n'est pas disponible
@@ -420,8 +460,10 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
         // Couleur de la ligne entière (2026-08-27, demande de Jeremy) : vert si
         // titre entièrement validé (théorie + fondamentales + pratique), rouge
         // dès qu'un critère est raté, neutre tant que la pratique est en attente.
-        const echoue = (d && !d.ok) || pratOk === false;
-        const valide = d && d.ok && pratOk === true;
+        const theorieEchoue = ev ? theorieOkExterne === false : (d && !d.ok);
+        const theorieValide = ev ? theorieOkExterne === true : (d && d.ok);
+        const echoue = theorieEchoue || pratOk === false;
+        const valide = theorieValide && pratOk === true;
         const intitule = echoue ? cellule(libelleTitreAffiche, BFS.rouge)
           : valide ? cellule(libelleTitreAffiche, BFS.vert)
           : libelleTitreAffiche;
