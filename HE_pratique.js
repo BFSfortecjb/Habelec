@@ -42,6 +42,23 @@ async function rendrePratique(zone) {
   // au navigateur). Seul le tout premier chargement affiche le message d'attente.
   const dejaAffiche = !!zone.querySelector('.epreuve');
   const scrollY = window.scrollY;
+  // 2026-09-09 (demande de Jeremy) : le simple "restaurer le même scrollY" ne
+  // suffisait pas quand une épreuve vient d'être validée — les cartes sont
+  // retriées (les épreuves closes descendent en bas), donc à pixel égal
+  // c'est un autre contenu qui se retrouve sous les yeux du formateur, ce
+  // qui donne l'impression que l'écran "remonte" tout seul. On repère plutôt
+  // la carte actuellement en haut de l'écran (par son id) et, après le
+  // nouveau rendu, on corrige le scroll pour que CETTE carte reste au même
+  // endroit visuellement, même si sa position dans la liste a changé.
+  let ancre = null;
+  if (dejaAffiche) {
+    let meilleure = null, meilleurEcart = Infinity;
+    for (const c of zone.querySelectorAll('.epreuve[data-epreuve-id]')) {
+      const ecart = Math.abs(c.getBoundingClientRect().top);
+      if (ecart < meilleurEcart) { meilleurEcart = ecart; meilleure = c; }
+    }
+    if (meilleure) ancre = { id: meilleure.dataset.epreuveId, top: meilleure.getBoundingClientRect().top };
+  }
   if (!dejaAffiche) zone.innerHTML = '<p class="chargement">Préparation des grilles…</p>';
 
   // Mode hors-ligne (2026-08) : source de lecture selon la connectivité —
@@ -124,7 +141,13 @@ async function rendrePratique(zone) {
       .sort((a, b) => ((a.reussie !== null) - (b.reussie !== null)) || a.gabarit_code.localeCompare(b.gabarit_code))
       .map(ep => carteEpreuve(ep, scenarios || [], theorieEchoueePourGabarit(ep.gabarit_code))).join('')}`;
 
-  if (dejaAffiche) window.scrollTo(0, scrollY);
+  if (ancre) {
+    const carteApres = zone.querySelector(`.epreuve[data-epreuve-id="${CSS.escape(ancre.id)}"]`);
+    if (carteApres) window.scrollBy(0, carteApres.getBoundingClientRect().top - ancre.top);
+    else window.scrollTo(0, scrollY);
+  } else if (dejaAffiche) {
+    window.scrollTo(0, scrollY);
+  }
 }
 
 function carteEpreuve(ep, scenarios, theorieEchouee) {
@@ -152,7 +175,7 @@ function carteEpreuve(ep, scenarios, theorieEchouee) {
   const peutAjouter = total < min || (obligatoiresEchouees && total < min + rattrapage);
   const badgeOrange = theorieEchouee && ep.reussie !== true;
   return `
-    <section class="carte epreuve">
+    <section class="carte epreuve" data-epreuve-id="${esc(ep.id)}">
       <div class="entete-epreuve">
         <h3>${esc(ep.gabarits.libelle)}</h3>
         ${badgeOrange
