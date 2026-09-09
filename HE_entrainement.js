@@ -14,9 +14,17 @@
    le code vide (ou via le lien permanent #entrainement sans ?code=,
    affiché dans l'onglet Organisme), pour un accès d'entraînement
    permanent, valable en toutes circonstances.
+
+   2026-09-09 (demande de Jeremy) : quand ce QCM de positionnement est fait
+   DANS une session (code renseigné), il est désormais lié au stagiaire qui
+   s'entraîne (choix de son nom, comme à l'accueil de l'examen réel) et le
+   résultat est conservé (habelec.enregistrer_positionnement) pour que le
+   formateur puisse le consulter et repérer des axes d'amélioration (voir
+   HE_app.js, action "📊 Positionnement"). Hors session (accès permanent,
+   code vide), rien n'est identifiable ni conservé — comme avant.
    ===================================================================== */
 
-const ENT = { code: null, session: null, questions: [], index: 0, symboles: null };
+const ENT = { code: null, jeton: null, session: null, questions: [], index: 0, symboles: null, stagiaires: null };
 
 async function ecranEntrainement(cible) {
   const codePrerempli = new URLSearchParams(location.hash.split('?')[1] || '').get('code');
@@ -47,7 +55,7 @@ function rendreChoixTitresEntrainement(cible) {
     <div class="stagiaire-accueil">
       <h1>QCM de positionnement</h1>
       <p class="sous-titre">Entraînement libre — la bonne réponse s'affiche après chaque question.
-        Ça ne compte pas pour ton dossier.</p>
+        Ça ne compte pas pour ton évaluation officielle.</p>
       <form id="form-entrainement" class="carte">
         <label>Code de la session <span class="aide">(facultatif — laisse vide pour un entraînement libre, hors de toute session)</span>
           <input name="code" maxlength="10" autocapitalize="characters" autocomplete="off"
@@ -58,7 +66,7 @@ function rendreChoixTitresEntrainement(cible) {
                 <label class="case"><input type="checkbox" name="symbole" value="${esc(sy.code)}"> ${esc(sy.libelle)}</label>`).join('')
             : '<p class="aide">Impossible de charger la liste des titres — vérifie ta connexion et recharge la page.</p>'}
         </fieldset>
-        <button class="principal" type="submit">Commencer</button>
+        <button class="principal" type="submit">Continuer</button>
       </form>
     </div>`;
 
@@ -67,16 +75,51 @@ function rendreChoixTitresEntrainement(cible) {
     const f = ev.target;
     const symboles = $$('input[name="symbole"]:checked').map(i => i.value);
     if (!symboles.length) return toast('Choisis au moins un titre', 'erreur');
+    ENT.symbolesChoisis = symboles;
     ENT.code = f.code.value.trim().toUpperCase() || null;
-    try {
-      const res = await rpc('tirage_positionnement', { p_code: ENT.code, p_symboles: symboles });
-      ENT.questions = (res.questions || []).map(q => ({ ...q, choix: [], corrige: false }));
-      ENT.session = res.session;
-      ENT.index = 0;
-      if (!ENT.questions.length) return toast('Aucune question disponible pour ce choix', 'erreur');
-      rendreQuestionEntrainement($('#ecran'));
-    } catch (e) { erreurSupabase('Tirage du QCM de positionnement', e); }
+    ENT.jeton = null;
+    if (ENT.code) {
+      // Dans une session : on demande qui s'entraîne, pour pouvoir lier et
+      // conserver le résultat (le formateur pourra ensuite le consulter).
+      try {
+        ENT.stagiaires = await rpc('liste_stagiaires_session', { p_code: ENT.code });
+      } catch (e) {
+        return erreurSupabase('Chargement de la liste des stagiaires', e);
+      }
+      if (!ENT.stagiaires.length) return toast('Aucun stagiaire dans cette session', 'erreur');
+      return rendreChoixStagiaireEntrainement($('#ecran'));
+    }
+    await lancerTirageEntrainement();
   });
+}
+
+function rendreChoixStagiaireEntrainement(cible) {
+  cible.innerHTML = `
+    <div class="stagiaire-accueil">
+      <h1>Qui s'entraîne ?</h1>
+      <p class="sous-titre">Ton résultat sera visible par ton formateur, pour t'aider à progresser —
+        ça ne compte toujours pas pour ton évaluation officielle.</p>
+      <div class="grille-noms">
+        ${ENT.stagiaires.map(s => `
+          <button class="nom" onclick="choisirStagiaireEntrainement('${esc(s.jeton)}')">${esc(s.nom)} ${esc(s.prenom)}</button>`).join('')}
+      </div>
+    </div>`;
+}
+
+async function choisirStagiaireEntrainement(jeton) {
+  ENT.jeton = jeton;
+  await lancerTirageEntrainement();
+}
+
+async function lancerTirageEntrainement() {
+  try {
+    const res = await rpc('tirage_positionnement', { p_code: ENT.code, p_symboles: ENT.symbolesChoisis });
+    ENT.questions = (res.questions || []).map(q => ({ ...q, choix: [], corrige: false }));
+    ENT.session = res.session;
+    ENT.index = 0;
+    if (!ENT.questions.length) return toast('Aucune question disponible pour ce choix', 'erreur');
+    rendreQuestionEntrainement($('#ecran'));
+  } catch (e) { erreurSupabase('Tirage du QCM de positionnement', e); }
 }
 
 function reponseCorrecte(q) {
@@ -152,7 +195,7 @@ function naviguerEntrainement(delta) {
   rendreQuestionEntrainement($('#ecran'));
 }
 
-function finEntrainement() {
+async function finEntrainement() {
   const qs = ENT.questions;
   const bonnes = qs.filter(reponseCorrecte).length;
   const fondEchouees = qs.filter(q => q.fondamentale && !reponseCorrecte(q)).length;
@@ -163,14 +206,42 @@ function finEntrainement() {
       <div class="carte">
         <p><b>${bonnes} / ${qs.length}</b> bonnes réponses (${Math.round(bonnes / qs.length * 100)} %)</p>
         ${fondEchouees ? `<p class="ko">${fondEchouees} question(s) fondamentale(s) ratée(s)</p>` : ''}
-        <p class="aide">Cet entraînement n'est pas enregistré et n'a aucun impact sur ton évaluation officielle.</p>
+        ${ENT.jeton
+          ? '<p class="aide">Résultat transmis à ton formateur (n\'a aucun impact sur ton évaluation officielle).</p>'
+          : '<p class="aide">Cet entraînement n\'est pas enregistré et n\'a aucun impact sur ton évaluation officielle.</p>'}
         <button class="principal" onclick="recommencerEntrainement()">Recommencer</button>
       </div>
     </div>`;
+
+  // Conservation du résultat uniquement quand l'entraînement a été fait
+  // DANS une session, avec un stagiaire identifié (voir en-tête de fichier).
+  if (ENT.jeton) {
+    const questionsPourFormateur = qs.map(q => ({
+      question_id: q.question_id,
+      theme_code: q.theme_code,
+      enonce: q.enonce,
+      fondamentale: q.fondamentale,
+      choix_multiple: q.choix_multiple,
+      explication: q.explication || null,
+      correcte: reponseCorrecte(q),
+      reponse_donnee: q.reponses.filter(r => q.choix.includes(r.id)).map(r => r.libelle),
+      bonne_reponse: q.reponses.filter(r => r.correcte).map(r => r.libelle),
+    }));
+    try {
+      await rpc('enregistrer_positionnement', {
+        p_jeton: ENT.jeton, p_symboles: ENT.symbolesChoisis, p_questions: questionsPourFormateur,
+      });
+    } catch (e) {
+      // Ne bloque jamais l'affichage du résultat au stagiaire pour un souci
+      // d'enregistrement côté serveur — juste un journal technique.
+      DEBUG.erreur('Enregistrement du positionnement', e.message || e);
+    }
+  }
 }
 
 function recommencerEntrainement() {
   ENT.questions = [];
   ENT.index = 0;
+  ENT.jeton = null;
   ecranEntrainement($('#ecran'));
 }

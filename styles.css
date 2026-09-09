@@ -372,6 +372,15 @@ details h4 { margin-top: 14px; font-size: 13px; color: var(--gris-doux); }
 .correction-entrainement .ko { color: var(--rouge); }
 .correction-entrainement .explication { margin: 6px 0 0; color: var(--gris); }
 
+/* Consultation "📊 Positionnement" par le formateur (2026-09-09) */
+.bloc-theme-erreurs { margin: 10px 0 16px; padding: 10px 14px; border-radius: 10px; background: var(--gris-fond); }
+.bloc-theme-erreurs p { margin: 0 0 6px; }
+.question-ratee { margin: 8px 0; padding: 10px 12px; border-radius: 8px; background: #fff; border-left: 4px solid var(--rouge); }
+.question-ratee p { margin: 3px 0; }
+.question-ratee .ok { color: var(--vert); }
+.question-ratee .ko { color: var(--rouge); }
+.question-ratee .explication { color: var(--gris); font-style: italic; }
+
 .proposition input { margin-top: 3px; width: 18px; height: 18px; flex: none; accent-color: var(--jaune-fonce); }
 
 .pied-passation { display: flex; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }

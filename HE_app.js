@@ -513,8 +513,62 @@ function ouvrirActionsStagiaire(id, nom, prenom, evaluationExterne) {
       <button onclick="fermerModale();genererTitrePdf('${id}')">🏅 Générer le titre d'habilitation (PDF)</button>
       <button onclick="fermerModale();genererPreuveExamenPdf('${id}')">🧾 Télécharger la preuve d'examen (PDF)</button>
       <button onclick="fermerModale();saisirResultatExterne('${id}')">📋 Saisir un résultat de formateur externe${evaluationExterne ? ' ✓' : ''}</button>
+      <button onclick="fermerModale();voirPositionnements('${id}', '${esc(nom)}', '${esc(prenom)}')">📊 Positionnement (entraînement libre)</button>
       <button class="danger" onclick="fermerModale();supprimerStagiaire('${id}')">🗑 Supprimer le stagiaire</button>
     </div>`);
+}
+
+/* ---------- Positionnement (entraînement libre) — consultation formateur
+ * (2026-09-09, demande de Jeremy) : quand le stagiaire s'est entraîné DANS
+ * la session (voir HE_entrainement.js), le résultat est conservé dans
+ * habelec.positionnements. On les liste ici du plus récent au plus ancien,
+ * et pour chaque tentative on fait remonter EN PREMIER les questions
+ * ratées (plutôt que de les diluer parmi les bonnes réponses), regroupées
+ * par thématique et triées par nombre d'erreurs décroissant, pour que le
+ * formateur repère vite les axes de travail. */
+async function voirPositionnements(id, nom, prenom) {
+  ouvrirModale(`Positionnement — ${nom} ${prenom}`, '<p class="aide">Chargement…</p>');
+  const { data, error } = await sb.from('positionnements')
+    .select('id, symboles, nb_questions, nb_bonnes, questions, cree_le')
+    .eq('stagiaire_id', id)
+    .order('cree_le', { ascending: false });
+  if (error) return $('#modale .corps-modale').replaceChildren(
+    document.createRange().createContextualFragment(`<p class="erreur">${esc(error.message)}</p>`));
+
+  if (!data || !data.length) {
+    return $('#modale .corps-modale').replaceChildren(document.createRange().createContextualFragment(
+      '<p class="aide">Aucun entraînement de positionnement enregistré pour ce stagiaire — il faut s\'être entraîné DANS cette session (code de session renseigné, puis son nom choisi) pour que le résultat soit conservé.</p>'));
+  }
+
+  const html = data.map((p, i) => {
+    const ratees = (p.questions || []).filter(q => !q.correcte);
+    const parTheme = {};
+    ratees.forEach(q => { (parTheme[q.theme_code] ||= []).push(q); });
+    const themesTries = Object.entries(parTheme).sort((a, b) => b[1].length - a[1].length);
+    const pct = p.nb_questions ? Math.round((p.nb_bonnes / p.nb_questions) * 100) : 0;
+    return `
+      <details class="carte" ${i === 0 ? 'open' : ''}>
+        <summary><b>${new Date(p.cree_le).toLocaleString('fr-FR')}</b> — ${esc((p.symboles || []).join(', '))}
+          — <b>${p.nb_bonnes} / ${p.nb_questions}</b> (${pct} %)</summary>
+        ${ratees.length ? `
+          <p class="aide"><b>${ratees.length} question(s) à revoir</b>, classées par thématique
+            (celle où il y a le plus d'erreurs en premier) :</p>
+          ${themesTries.map(([theme, qs]) => `
+            <div class="bloc-theme-erreurs">
+              <p><b>${esc(theme)}</b> — ${qs.length} erreur(s)</p>
+              ${qs.map(q => `
+                <div class="question-ratee">
+                  <p>${esc(q.enonce)}${q.fondamentale ? ' <span class="puce fond">Question fondamentale</span>' : ''}</p>
+                  <p class="ko">Réponse donnée : ${q.reponse_donnee?.length ? esc(q.reponse_donnee.join(', ')) : '<i>(aucune)</i>'}</p>
+                  <p class="ok">Bonne réponse : ${esc((q.bonne_reponse || []).join(', '))}</p>
+                  ${q.explication ? `<p class="explication">${esc(q.explication)}</p>` : ''}
+                </div>`).join('')}
+            </div>`).join('')}
+        ` : '<p class="ok">✔ Toutes les questions ont été répondues correctement.</p>'}
+      </details>`;
+  }).join('');
+
+  $('#modale .corps-modale').replaceChildren(document.createRange().createContextualFragment(html));
 }
 
 /* ---------- QCM de rattrapage (2026-09-04, demande de Jeremy) ----------
@@ -2244,6 +2298,8 @@ async function rendreOrganisme(zone) {
           fonctionnent en permanence. Le visiteur choisit ses titres visés et s'entraîne avec les
           réponses affichées immédiatement — rien n'est enregistré, aucun impact sur un dossier.
           À imprimer une fois pour toutes (affiche à l'accueil, plaquette commerciale...).</p>
+        <label class="case"><input type="checkbox" name="entrainement_permanent_actif" ${o.entrainement_permanent_actif === false ? '' : 'checked'}>
+          Activer l'accès d'entraînement permanent (hors session)</label>
         <div id="qr-entrainement-permanent"></div>
         <p id="qr-permanent-erreur" class="erreur-discrete" hidden></p>
         <div><code id="lien-entrainement-permanent"></code></div>
@@ -2307,6 +2363,7 @@ async function rendreOrganisme(zone) {
       cachet_data_briec: lireImage('cachet-organisme-briec'),
       drive_dossier_racine_id: f.drive_dossier_racine_id.value.trim() || null,
       fondamentales_actives: f.fondamentales_actives.checked,
+      entrainement_permanent_actif: f.entrainement_permanent_actif.checked,
       seuil_reussite_defaut: Math.max(1, Math.min(100, parseInt(f.seuil_reussite_defaut.value, 10) || 70)) / 100,
       email_secretariat: f.email_secretariat.value.trim() || null,
     };
