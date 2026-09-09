@@ -8,8 +8,12 @@
    avec la bonne réponse et l'explication affichées immédiatement après
    chaque question. Rien n'est enregistré côté serveur — aucun impact sur
    le dossier du stagiaire ni sur son évaluation officielle. Accessible par
-   un QR code distinct de celui de l'examen, mais avec le même code de
-   session (juste pour retrouver l'intitulé affiché à l'écran).
+   un QR code distinct de celui de l'examen, avec le code d'une session
+   (juste pour retrouver l'intitulé affiché à l'écran) — ou, depuis le
+   2026-09-09 (demande de Jeremy), totalement hors session : en laissant
+   le code vide (ou via le lien permanent #entrainement sans ?code=,
+   affiché dans l'onglet Organisme), pour un accès d'entraînement
+   permanent, valable en toutes circonstances.
    ===================================================================== */
 
 const ENT = { code: null, session: null, questions: [], index: 0, symboles: null };
@@ -45,8 +49,8 @@ function rendreChoixTitresEntrainement(cible) {
       <p class="sous-titre">Entraînement libre — la bonne réponse s'affiche après chaque question.
         Ça ne compte pas pour ton dossier.</p>
       <form id="form-entrainement" class="carte">
-        <label>Code de la session
-          <input name="code" maxlength="10" required autocapitalize="characters" autocomplete="off"
+        <label>Code de la session <span class="aide">(facultatif — laisse vide pour un entraînement libre, hors de toute session)</span>
+          <input name="code" maxlength="10" autocapitalize="characters" autocomplete="off"
                  value="${esc(ENT.code || '')}" class="saisie-code"></label>
         <fieldset><legend>Titre(s) visé(s)</legend>
           ${symboles.length
@@ -63,7 +67,7 @@ function rendreChoixTitresEntrainement(cible) {
     const f = ev.target;
     const symboles = $$('input[name="symbole"]:checked').map(i => i.value);
     if (!symboles.length) return toast('Choisis au moins un titre', 'erreur');
-    ENT.code = f.code.value.trim().toUpperCase();
+    ENT.code = f.code.value.trim().toUpperCase() || null;
     try {
       const res = await rpc('tirage_positionnement', { p_code: ENT.code, p_symboles: symboles });
       ENT.questions = (res.questions || []).map(q => ({ ...q, choix: [], corrige: false }));

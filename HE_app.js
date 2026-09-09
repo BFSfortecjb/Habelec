@@ -364,6 +364,23 @@ function telechargerQrPassation() {
   lien.click();
 }
 
+function copierLienEntrainementPermanent() {
+  const lien = $('#lien-entrainement-permanent')?.textContent;
+  if (!lien) return;
+  navigator.clipboard.writeText(lien);
+  toast('Lien copié');
+}
+
+function telechargerQrEntrainementPermanent() {
+  const conteneur = $('#qr-entrainement-permanent');
+  const source = conteneur?.querySelector('canvas') || conteneur?.querySelector('img');
+  if (!source) return toast('QR code indisponible', 'erreur');
+  const lien = document.createElement('a');
+  lien.download = 'qr-entrainement-permanent.png';
+  lien.href = source.tagName === 'CANVAS' ? source.toDataURL('image/png') : source.src;
+  lien.click();
+}
+
 // Couleur d'une puce « titre visé » selon resultats_symbole (2026-09-09,
 // grille complète demandée par Jeremy — theorie_ok et pratique_ok sont
 // chacun true/false/NULL, NULL voulant dire "pas encore évalué") :
@@ -2222,6 +2239,17 @@ async function rendreOrganisme(zone) {
           elles ne seront plus exigées pour valider un titre, et le badge "Question fondamentale" ne
           s'affichera plus pendant la passation. S'applique à toutes les sessions.</p>
       </fieldset>
+      <fieldset><legend>Entraînement permanent (hors session, 2026-09-09)</legend>
+        <p class="aide">Ce lien et ce QR code sont fixes : ils ne dépendent d'aucune session et
+          fonctionnent en permanence. Le visiteur choisit ses titres visés et s'entraîne avec les
+          réponses affichées immédiatement — rien n'est enregistré, aucun impact sur un dossier.
+          À imprimer une fois pour toutes (affiche à l'accueil, plaquette commerciale...).</p>
+        <div id="qr-entrainement-permanent"></div>
+        <p id="qr-permanent-erreur" class="erreur-discrete" hidden></p>
+        <div><code id="lien-entrainement-permanent"></code></div>
+        <button type="button" class="lien" onclick="copierLienEntrainementPermanent()">Copier le lien</button>
+        <button type="button" class="lien" onclick="telechargerQrEntrainementPermanent()">Télécharger l'image</button>
+      </fieldset>
       <fieldset><legend>Sauvegarde automatique sur Google Drive (compte de service) — un
         dossier par session, avec les PDF des stagiaires et un fichier session.json
         réimportable en cas de purge</legend>
@@ -2247,6 +2275,21 @@ async function rendreOrganisme(zone) {
   activerSignature('signature-organisme');
   activerImage('cachet-organisme');
   activerImage('cachet-organisme-briec');
+
+  // Lien fixe (aucun ?code= : voir tirage_positionnement, qui accepte
+  // désormais un code vide) vers l'entraînement libre, hors de toute
+  // session — 2026-09-09, demande de Jeremy.
+  const lienEntrainementPermanent = location.origin + location.pathname + '#entrainement';
+  $('#lien-entrainement-permanent').textContent = lienEntrainementPermanent;
+  try {
+    if (typeof QRCode === 'undefined') throw new Error('bibliothèque QRCode non chargée');
+    $('#qr-entrainement-permanent').innerHTML = '';
+    new QRCode($('#qr-entrainement-permanent'), { text: lienEntrainementPermanent, width: 160, height: 160 });
+  } catch (e) {
+    const p = $('#qr-permanent-erreur');
+    if (p) { p.hidden = false; p.textContent = 'QR code indisponible (' + e.message + ')'; }
+  }
+
   $('#form-organisme').addEventListener('submit', async ev => {
     ev.preventDefault();
     const f = ev.target;
