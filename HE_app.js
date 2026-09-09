@@ -2078,9 +2078,33 @@ function analyserGift(texte) {
 
 /* ============ 7. Onglet Mises en situation ========================== */
 let SCENARIOS_CACHE = [];
+// 2026-09-09 (demande de Jeremy) : quels titres sont dépliés (persiste entre
+// deux rendus, sinon un ajout/modif/suppression refermait tout).
+const SCENARIOS_OUVERTS = new Set();
+
+function onToggleScenarioGabarit(code, ouvert) {
+  if (ouvert) SCENARIOS_OUVERTS.add(code); else SCENARIOS_OUVERTS.delete(code);
+}
 
 async function rendreScenarios(zone) {
-  zone.innerHTML = '<p class="chargement">Chargement…</p>';
+  // Même correctif "l'écran remonte tout seul" que pour l'évaluation pratique
+  // (HE_pratique.js) : on repère le titre actuellement en haut de l'écran
+  // avant de tout regénérer, puis on corrige le scroll pour qu'il y reste,
+  // même si le nombre de scénarios affichés au-dessus a changé.
+  const dejaAffiche = !!zone.querySelector('details[data-gabarit-code]');
+  const scrollY = window.scrollY;
+  let ancre = null;
+  if (dejaAffiche) {
+    let meilleure = null, meilleurEcart = Infinity;
+    for (const d of zone.querySelectorAll('details[data-gabarit-code]')) {
+      const ecart = Math.abs(d.getBoundingClientRect().top);
+      if (ecart < meilleurEcart) { meilleurEcart = ecart; meilleure = d; }
+    }
+    if (meilleure) ancre = { code: meilleure.dataset.gabaritCode, top: meilleure.getBoundingClientRect().top };
+  } else {
+    zone.innerHTML = '<p class="chargement">Chargement…</p>';
+  }
+
   const { data } = await sb.from('scenarios_pratiques').select('*').order('gabarit_code').order('numero');
   SCENARIOS_CACHE = data || [];
   const parGabarit = {};
@@ -2094,7 +2118,9 @@ async function rendreScenarios(zone) {
        Chaque scénario porte un <b>numéro unique</b> (ex. « B0-3 ») : indiquez-le pour demander
        à un administrateur d'en supprimer un.</p>
     ${S.referentiel.gabarits.map(g => `
-      <details ${parGabarit[g.code]?.length ? '' : 'class="vide"'} open>
+      <details data-gabarit-code="${esc(g.code)}" ${parGabarit[g.code]?.length ? '' : 'class="vide"'}
+        ${SCENARIOS_OUVERTS.has(g.code) ? 'open' : ''}
+        ontoggle="onToggleScenarioGabarit('${esc(g.code)}', this.open)">
         <summary>${esc(g.libelle)} <span class="puce">${parGabarit[g.code]?.length || 0} scénario(s)</span>
           <span class="puce">${g.mises_en_situation_min} situation(s) minimum</span></summary>
         <div class="barre-actions"><button onclick="ajouterScenario('${esc(g.code)}')">+ Ajouter un scénario</button></div>
@@ -2114,6 +2140,12 @@ async function rendreScenarios(zone) {
         <ol>${S.referentiel.savoirFaire.filter(sf => sf.gabarit_code === g.code)
           .map(sf => `<li>${esc(sf.libelle)}</li>`).join('')}</ol>
       </details>`).join('')}`;
+
+  if (ancre) {
+    const detailsApres = zone.querySelector(`details[data-gabarit-code="${CSS.escape(ancre.code)}"]`);
+    if (detailsApres) window.scrollBy(0, detailsApres.getBoundingClientRect().top - ancre.top);
+    else window.scrollTo(0, scrollY);
+  }
 }
 
 // 2026-09-09 (demande de Jeremy) : formulaire d'ajout/modification d'une
