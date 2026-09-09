@@ -158,6 +158,9 @@ async function nouvelleSession() {
   const { error } = await sb.from('sessions_formation').insert({
     organisme_id: S.organisme.id, formateur_id: S.profil.id,
     intitule, numero_session_galaxy: numeroGalaxy.trim(), code_acces: code, statut: 'brouillon', lieu,
+    // Seuil de réussite : réglage d'organisme (2026-09-09), plus modifiable
+    // session par session — voir onglet Organisme.
+    seuil_global: S.organisme.seuil_reussite_defaut ?? 0.70,
   });
   if (error) return erreurSupabase('Création de la session', error);
   toast('Session créée — code d\'accès ' + code);
@@ -700,13 +703,14 @@ async function cloturerSession() {
 }
 
 async function ouvrirParametresSession() {
-  const seuil = prompt('Seuil de réussite en % (sur l\'ensemble des questions) :',
-    Math.round(S.session.seuil_global * 100));
-  if (seuil === null) return;
+  // Le seuil de réussite n'est plus réglable ici depuis le 2026-09-09 —
+  // c'est un réglage d'organisme (onglet Organisme, à côté de l'activation
+  // des questions fondamentales), appliqué automatiquement à la création
+  // de chaque nouvelle session.
   const duree = prompt('Durée maximale du QCM en minutes (vide = pas de limite) :',
     S.session.duree_max_min || '');
+  if (duree === null) return;
   const { error } = await sb.from('sessions_formation').update({
-    seuil_global: Math.max(1, Math.min(100, parseInt(seuil, 10) || 70)) / 100,
     duree_max_min: duree ? parseInt(duree, 10) : null,
   }).eq('id', S.session.id);
   if (error) return erreurSupabase('Paramètres', error);
@@ -2172,7 +2176,13 @@ async function rendreOrganisme(zone) {
           « Envoi secrétariat » depuis une session. Envoyé via le service mail commun Univers BFS
           (bfs.noreplay@gmail.com) — pas de configuration supplémentaire nécessaire ici.</p>
       </fieldset>
-      <fieldset><legend>Questions fondamentales</legend>
+      <fieldset><legend>Règle de réussite</legend>
+        <label>Seuil de réussite (% de bonnes réponses exigé)
+          <input name="seuil_reussite_defaut" type="number" min="1" max="100" step="1"
+            value="${Math.round((o.seuil_reussite_defaut ?? 0.70) * 100)}" style="width:6em"></label>
+        <p class="aide">Appliqué automatiquement à chaque nouvelle session créée. Les sessions déjà
+          créées gardent le seuil qu'elles avaient au moment de leur création (visible sur l'écran de
+          la session) — ce réglage ne les modifie pas rétroactivement.</p>
         <label class="case"><input type="checkbox" name="fondamentales_actives" ${o.fondamentales_actives === false ? '' : 'checked'}>
           Activer les questions fondamentales (échec = titre non validé, badge affiché au stagiaire pendant l'examen)</label>
         <p class="aide">Décoche pour désactiver entièrement les questions fondamentales pour cet organisme :
@@ -2221,6 +2231,7 @@ async function rendreOrganisme(zone) {
       cachet_data_briec: lireImage('cachet-organisme-briec'),
       drive_dossier_racine_id: f.drive_dossier_racine_id.value.trim() || null,
       fondamentales_actives: f.fondamentales_actives.checked,
+      seuil_reussite_defaut: Math.max(1, Math.min(100, parseInt(f.seuil_reussite_defaut.value, 10) || 70)) / 100,
       email_secretariat: f.email_secretariat.value.trim() || null,
     };
     // La clé JSON ne se réaffiche jamais (juste un repère en placeholder) —
