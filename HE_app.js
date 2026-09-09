@@ -2106,6 +2106,7 @@ async function rendreScenarios(zone) {
             <td>${esc(s.probleme_ou_alea)}</td><td>${esc(s.attendus_principaux)}</td>
             <td>${esc(s.motif_arret_obligatoire)}</td>
             <td><button class="lien" onclick="ajouterScenario('${esc(g.code)}', '${esc(s.id)}')">Modifier</button>
+              <button class="lien" onclick="ajouterScenario('${esc(g.code)}', null, '${esc(s.id)}')">Dupliquer</button>
               ${S.vision === 'admin' ? `<button class="lien" onclick="supprimerScenario('${esc(s.id)}', '${esc(g.code)}-${s.numero}')">Supprimer</button>` : ''}</td></tr>`).join('')
             || `<tr><td colspan="7" class="vide">Aucun scénario enregistré — la grille normative reste utilisable telle quelle.</td></tr>`}
           </tbody></table>
@@ -2119,12 +2120,18 @@ async function rendreScenarios(zone) {
 // mise en situation pratique (table habelec.scenarios_pratiques). Les
 // policies RLS existantes (contenu_ajout / contenu_maj) autorisent déjà
 // tout formateur/secrétariat de l'organisme — aucune migration nécessaire.
-function ajouterScenario(gabaritCode, scenarioId = null) {
+function ajouterScenario(gabaritCode, scenarioId = null, dupliquerId = null) {
   const g = S.referentiel.gabarits.find(x => x.code === gabaritCode);
   const s = scenarioId ? SCENARIOS_CACHE.find(x => x.id === scenarioId) : null;
-  const v = champ => esc(s?.[champ] || '');
+  const source = dupliquerId ? SCENARIOS_CACHE.find(x => x.id === dupliquerId) : null;
+  const pre = s || source; // pré-remplissage : édition OU duplication
+  const v = champ => esc((champ === 'intitule' && source ? `${source.intitule} (copie)` : pre?.[champ]) || '');
 
-  ouvrirModale(`${s ? `Modifier le scénario ${esc(gabaritCode)}-${s.numero}` : 'Ajouter un scénario'} — ${esc(g.libelle)}`, `
+  let titreModale = 'Ajouter un scénario';
+  if (s) titreModale = `Modifier le scénario ${esc(gabaritCode)}-${s.numero}`;
+  else if (source) titreModale = `Dupliquer le scénario ${esc(gabaritCode)}-${source.numero}`;
+
+  ouvrirModale(`${titreModale} — ${esc(g.libelle)}`, `
     <form id="form-scenario" class="formulaire">
       <label>Intitulé <span class="requis">*</span>
         <input name="intitule" required value="${v('intitule')}"></label>
