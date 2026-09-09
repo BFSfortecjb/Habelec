@@ -355,14 +355,19 @@ function telechargerQrPassation() {
 }
 
 // Couleur d'une puce « titre visé » selon resultats_symbole :
-//  - pas de ligne (jamais calculé)     -> gris (défaut, pas de classe)
-//  - theorie_ok === false              -> rouge : théorie non validée
-//  - theorie_ok === true, pratique_ok  -> vert foncé : titre validé
-//  - theorie_ok === true, sinon        -> vert clair : théorie validée, pratique en attente
+//  - pas de ligne (jamais calculé)        -> gris (défaut, pas de classe)
+//  - theorie_ok === false                 -> rouge : théorie non validée
+//  - theorie_ok === true, pratique_ok === false -> rouge foncé : pratique en échec
+//    (2026-09-09, bug remonté par Jeremy : cette puce restait en vert clair
+//    "pratique en attente" au lieu de signaler l'échec)
+//  - theorie_ok === true, pratique_ok === true  -> vert foncé : titre validé
+//  - theorie_ok === true, pratique_ok === null/undefined -> vert clair : pratique en attente
 function classeTitre(resultat) {
   if (!resultat || resultat.theorie_ok === null) return '';
   if (resultat.theorie_ok === false) return 'titre-rouge';
-  return resultat.pratique_ok ? 'titre-vert-fonce' : 'titre-vert-clair';
+  if (resultat.pratique_ok === true) return 'titre-vert-fonce';
+  if (resultat.pratique_ok === false) return 'titre-pratique-ko';
+  return 'titre-vert-clair';
 }
 
 /* --------- Tableau de bord formateur : validation des titres du groupe (2026-08) ---------
@@ -374,11 +379,12 @@ function tableauBordGroupe(stagiaires, resultatsParStagiaire) {
   (stagiaires || []).forEach(st => {
     (st.stagiaire_symboles || []).forEach(x => {
       const code = x.symbole_code;
-      const c = (parTitre[code] ||= { total: 0, valides: 0, pratiqueAttente: 0, theorieKo: 0, nonEvalues: 0 });
+      const c = (parTitre[code] ||= { total: 0, valides: 0, pratiqueAttente: 0, pratiqueKo: 0, theorieKo: 0, nonEvalues: 0 });
       c.total++;
       switch (classeTitre((resultatsParStagiaire[st.id] || {})[code])) {
         case 'titre-vert-fonce': c.valides++; break;
         case 'titre-vert-clair': c.pratiqueAttente++; break;
+        case 'titre-pratique-ko': c.pratiqueKo++; break;
         case 'titre-rouge': c.theorieKo++; break;
         default: c.nonEvalues++;
       }
@@ -397,13 +403,15 @@ function tableauBordGroupe(stagiaires, resultatsParStagiaire) {
       <summary><b>Tableau de bord — validation des titres du groupe</b></summary>
       <table class="tableau compact">
         <thead><tr><th>Titre</th><th>Stagiaires</th><th>Validés</th>
-          <th>Théorie OK, pratique en attente</th><th>Théorie non validée</th><th>Non évalués</th></tr></thead>
+          <th>Théorie OK, pratique en attente</th><th>Pratique en échec</th>
+          <th>Théorie non validée</th><th>Non évalués</th></tr></thead>
         <tbody>${titres.map(([code, c]) => `
           <tr>
             <td><b>${esc(libelleSymbole(code))}</b></td>
             <td>${c.total}</td>
             <td>${c.valides ? `<span class="etat ok">${c.valides}</span>` : '—'}</td>
             <td>${c.pratiqueAttente ? `<span class="etat encours">${c.pratiqueAttente}</span>` : '—'}</td>
+            <td>${c.pratiqueKo ? `<span class="etat ko">${c.pratiqueKo}</span>` : '—'}</td>
             <td>${c.theorieKo ? `<span class="etat ko">${c.theorieKo}</span>` : '—'}</td>
             <td>${c.nonEvalues || '—'}</td>
           </tr>`).join('')}</tbody>
@@ -435,6 +443,7 @@ function ligneStagiaire(st, suivi, resultatsSymboles) {
     <td>${esc(st.nom)}</td><td>${esc(st.prenom)}</td><td>${esc(st.fonction)}</td>
     <td>${symb.map(x => `<span class="puce ${x.classe}" title="${x.classe === 'titre-rouge' ? 'Théorie non validée' :
         x.classe === 'titre-vert-fonce' ? 'Titre validé (théorie + pratique)' :
+        x.classe === 'titre-pratique-ko' ? 'Théorie validée, pratique en échec' :
         x.classe === 'titre-vert-clair' ? 'Théorie validée, pratique en attente' : 'Non évalué'}">${esc(x.libelle)}</span>`)
       .join(' ') || '<i>aucun</i>'}</td>
     <td>${(st.domaines || []).join(', ')}</td>

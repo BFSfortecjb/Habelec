@@ -151,10 +151,12 @@ button.icone:hover { background: var(--gris-fond); border-radius: 6px; }
 /* Statut de validation d'un titre visé, dans la liste des stagiaires :
    gris (par défaut) = non évalué, vert clair = théorie validée (pratique en
    attente), vert foncé = théorie + pratique validées, rouge = théorie non
-   validée (la pratique de ce titre devient sans objet, sauf rattrapage). */
+   validée (la pratique de ce titre devient sans objet, sauf rattrapage),
+   rouge foncé = théorie validée mais pratique en échec (2026-09-09). */
 .puce.titre-vert-clair { background: var(--vert-fond); color: var(--vert); font-weight: 600; }
 .puce.titre-vert-fonce { background: var(--vert); color: #fff; font-weight: 700; }
 .puce.titre-rouge { background: var(--rouge-fond); color: var(--rouge); font-weight: 700; }
+.puce.titre-pratique-ko { background: var(--rouge); color: #fff; font-weight: 700; }
 
 .aide { color: var(--gris-doux); font-size: 13.5px; }
 .chargement { color: var(--gris-doux); font-style: italic; }
