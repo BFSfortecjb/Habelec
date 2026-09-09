@@ -2077,33 +2077,114 @@ function analyserGift(texte) {
 }
 
 /* ============ 7. Onglet Mises en situation ========================== */
+let SCENARIOS_CACHE = [];
+
 async function rendreScenarios(zone) {
   zone.innerHTML = '<p class="chargement">Chargement…</p>';
-  const { data } = await sb.from('scenarios_pratiques').select('*').order('gabarit_code');
+  const { data } = await sb.from('scenarios_pratiques').select('*').order('gabarit_code').order('numero');
+  SCENARIOS_CACHE = data || [];
   const parGabarit = {};
-  (data || []).forEach(s => (parGabarit[s.gabarit_code] ||= []).push(s));
+  SCENARIOS_CACHE.forEach(s => (parGabarit[s.gabarit_code] ||= []).push(s));
 
   zone.innerHTML = `
     <div class="barre-actions"><h2>Mises en situation pratiques</h2></div>
     <p class="aide">Ces scénarios servent de trame aux épreuves pratiques. Le barème
        appliqué est celui de la norme : A sans erreur, B erreur minime, C erreur majeure,
-       D erreur grave — <b>aucun D et un seul C au maximum par mise en situation</b>.</p>
+       D erreur grave — <b>aucun D et un seul C au maximum par mise en situation</b>.
+       Chaque scénario porte un <b>numéro unique</b> (ex. « B0-3 ») : indiquez-le pour demander
+       à un administrateur d'en supprimer un.</p>
     ${S.referentiel.gabarits.map(g => `
-      <details ${parGabarit[g.code]?.length ? '' : 'class="vide"'}>
+      <details ${parGabarit[g.code]?.length ? '' : 'class="vide"'} open>
         <summary>${esc(g.libelle)} <span class="puce">${parGabarit[g.code]?.length || 0} scénario(s)</span>
           <span class="puce">${g.mises_en_situation_min} situation(s) minimum</span></summary>
-        <table class="tableau"><thead><tr><th>Intitulé</th><th>Contexte</th><th>Aléa</th>
-          <th>Attendus</th><th>Motif d'arrêt</th></tr></thead>
+        <div class="barre-actions"><button onclick="ajouterScenario('${esc(g.code)}')">+ Ajouter un scénario</button></div>
+        <table class="tableau"><thead><tr><th>N°</th><th>Intitulé</th><th>Contexte</th><th>Aléa</th>
+          <th>Attendus</th><th>Motif d'arrêt</th><th></th></tr></thead>
           <tbody>${(parGabarit[g.code] || []).map(s => `<tr>
+            <td><span class="puce">${esc(g.code)}-${s.numero}</span></td>
             <td>${esc(s.intitule)}</td><td>${esc(s.contexte_technique)}</td>
             <td>${esc(s.probleme_ou_alea)}</td><td>${esc(s.attendus_principaux)}</td>
-            <td>${esc(s.motif_arret_obligatoire)}</td></tr>`).join('')
-            || '<tr><td colspan="5" class="vide">Aucun scénario enregistré — la grille normative reste utilisable telle quelle.</td></tr>'}
+            <td>${esc(s.motif_arret_obligatoire)}</td>
+            <td><button class="lien" onclick="ajouterScenario('${esc(g.code)}', '${esc(s.id)}')">Modifier</button>
+              ${S.vision === 'admin' ? `<button class="lien" onclick="supprimerScenario('${esc(s.id)}', '${esc(g.code)}-${s.numero}')">Supprimer</button>` : ''}</td></tr>`).join('')
+            || `<tr><td colspan="7" class="vide">Aucun scénario enregistré — la grille normative reste utilisable telle quelle.</td></tr>`}
           </tbody></table>
         <h4>Savoir-faire évalués (tableau ${esc(g.tableau_savoir_faire || '')})</h4>
         <ol>${S.referentiel.savoirFaire.filter(sf => sf.gabarit_code === g.code)
           .map(sf => `<li>${esc(sf.libelle)}</li>`).join('')}</ol>
       </details>`).join('')}`;
+}
+
+// 2026-09-09 (demande de Jeremy) : formulaire d'ajout/modification d'une
+// mise en situation pratique (table habelec.scenarios_pratiques). Les
+// policies RLS existantes (contenu_ajout / contenu_maj) autorisent déjà
+// tout formateur/secrétariat de l'organisme — aucune migration nécessaire.
+function ajouterScenario(gabaritCode, scenarioId = null) {
+  const g = S.referentiel.gabarits.find(x => x.code === gabaritCode);
+  const s = scenarioId ? SCENARIOS_CACHE.find(x => x.id === scenarioId) : null;
+  const v = champ => esc(s?.[champ] || '');
+
+  ouvrirModale(`${s ? `Modifier le scénario ${esc(gabaritCode)}-${s.numero}` : 'Ajouter un scénario'} — ${esc(g.libelle)}`, `
+    <form id="form-scenario" class="formulaire">
+      <label>Intitulé <span class="requis">*</span>
+        <input name="intitule" required value="${v('intitule')}"></label>
+      <div class="grille-2">
+        <label>Rôle du stagiaire <input name="role" value="${v('role')}"></label>
+        <label>Type d'activité <input name="type_activite" value="${v('type_activite')}"></label>
+      </div>
+      <label>Contexte technique <textarea name="contexte_technique" rows="2">${v('contexte_technique')}</textarea></label>
+      <div class="grille-2">
+        <label>Variation d'environnement <textarea name="variation_environnement" rows="2">${v('variation_environnement')}</textarea></label>
+        <label>Variation documentaire <textarea name="variation_documentaire" rows="2">${v('variation_documentaire')}</textarea></label>
+      </div>
+      <label>Problème ou aléa <textarea name="probleme_ou_alea" rows="2">${v('probleme_ou_alea')}</textarea></label>
+      <label>Attendus principaux <textarea name="attendus_principaux" rows="2">${v('attendus_principaux')}</textarea></label>
+      <label>Motif d'arrêt obligatoire <textarea name="motif_arret_obligatoire" rows="2">${v('motif_arret_obligatoire')}</textarea></label>
+      <label>Matériel nécessaire <textarea name="materiel_necessaire" rows="2">${v('materiel_necessaire')}</textarea></label>
+      <label>Référence externe <span class="aide">(document, fiche source…)</span>
+        <input name="reference_ext" value="${v('reference_ext')}"></label>
+      <div class="pied-modale">
+        <button type="button" onclick="fermerModale()">Annuler</button>
+        <button type="submit" class="principal">Enregistrer</button>
+      </div>
+    </form>`);
+
+  $('#form-scenario').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const f = ev.target;
+    const donnees = {
+      gabarit_code: gabaritCode,
+      intitule: f.intitule.value.trim(),
+      role: f.role.value.trim() || null,
+      type_activite: f.type_activite.value.trim() || null,
+      contexte_technique: f.contexte_technique.value.trim() || null,
+      variation_environnement: f.variation_environnement.value.trim() || null,
+      variation_documentaire: f.variation_documentaire.value.trim() || null,
+      probleme_ou_alea: f.probleme_ou_alea.value.trim() || null,
+      attendus_principaux: f.attendus_principaux.value.trim() || null,
+      motif_arret_obligatoire: f.motif_arret_obligatoire.value.trim() || null,
+      materiel_necessaire: f.materiel_necessaire.value.trim() || null,
+      reference_ext: f.reference_ext.value.trim() || null,
+    };
+    if (!donnees.intitule) return toast('L\'intitulé est obligatoire', 'erreur');
+    try {
+      const { error } = s
+        ? await sb.from('scenarios_pratiques').update(donnees).eq('id', s.id)
+        : await sb.from('scenarios_pratiques').insert(donnees);
+      if (error) throw error;
+      fermerModale();
+      toast(s ? 'Scénario modifié' : 'Scénario ajouté');
+      rendreScenarios($('#contenu'));
+    } catch (e) { erreurSupabase('Enregistrement du scénario', e); }
+  });
+}
+
+async function supprimerScenario(id, identifiant) {
+  if (!confirmer(`Supprimer définitivement le scénario ${identifiant} ?`)) return;
+  const { error } = await sb.from('scenarios_pratiques').delete().eq('id', id);
+  if (error) return erreurSupabase('Suppression du scénario', error);
+  toast('Scénario supprimé');
+  rendreScenarios($('#contenu'));
 }
 
 /* ============ 8. Onglet Organisme =================================== */
