@@ -60,6 +60,7 @@ const ONGLETS = {
   verification:  'Vérification',
   organisme:     'Organisme',
   comptes:       'Comptes',
+  motsdepasse:   'Mots de passe',
   moncompte:     'Mon compte',
 };
 
@@ -67,9 +68,17 @@ const ONGLETS = {
 // ou tous les stagiaires, pas seulement l'organisme courant)
 const ONGLETS_ADMIN = new Set(['titres', 'verification', 'organisme', 'comptes']);
 
+// Onglet ouvert au rôle Secrétariat en plus de l'administrateur (2026-09-09,
+// demande de Jeremy : la secrétaire doit pouvoir débloquer un formateur qui a
+// oublié son mot de passe, sans passer par l'administrateur ni par Supabase).
+const ONGLETS_SECRETARIAT = new Set(['motsdepasse']);
+
 function ongletsVisibles() {
-  const liste = Object.entries(ONGLETS);
-  return S.vision === 'admin' ? liste : liste.filter(([id]) => !ONGLETS_ADMIN.has(id));
+  return Object.entries(ONGLETS).filter(([id]) => {
+    if (ONGLETS_ADMIN.has(id)) return S.vision === 'admin';
+    if (ONGLETS_SECRETARIAT.has(id)) return S.vision === 'admin' || S.profil?.role === 'secretariat';
+    return true;
+  });
 }
 
 const RENDU = {
@@ -81,6 +90,7 @@ const RENDU = {
   verification: rendreVerification,
   organisme:    rendreOrganisme,
   comptes:      rendreComptes,
+  motsdepasse:  rendreMotsDePasse,
   moncompte:    rendreMonCompte,
   pratique:     rendrePratique,     // défini dans HE_pratique.js
 };
@@ -2659,6 +2669,61 @@ function lireImage(id) {
   const img = document.querySelector('#' + id + ' img.apercu');
   if (!img || !img.src || img.style.display === 'none') return null;
   return img.src.startsWith('data:') ? img.src : null;
+}
+
+/* ============ 9 bis. Onglet Mots de passe (admin + secrétariat) ======
+ * Demande de Jeremy (2026-09-09) : la secrétaire doit pouvoir débloquer un
+ * formateur qui a oublié son mot de passe, sans passer par l'administrateur
+ * ni par la console Supabase. Utilise l'API standard Supabase Auth
+ * (resetPasswordForEmail) : envoie au formateur un email contenant un lien
+ * pour choisir lui-même un nouveau mot de passe. Ne nécessite aucune clé
+ * privilégiée (service_role) et ne montre jamais le mot de passe actuel —
+ * personne, pas même l'admin, ne peut le consulter. La liste des comptes
+ * vient directement de la table formateurs (policy « form_lecture », déjà
+ * en place : tout compte autorisé peut voir les autres comptes de son
+ * organisme), donc aucun changement de sécurité côté base n'était requis. */
+async function rendreMotsDePasse(zone) {
+  zone.innerHTML = '<p class="aide">Chargement…</p>';
+  const { data, error } = await sb.from('formateurs')
+    .select('id, nom, prenom, email, role')
+    .order('nom');
+  if (error) return erreurSupabase('Chargement des comptes', error);
+
+  zone.innerHTML = `
+    <div class="barre-actions"><h2>Mots de passe</h2></div>
+    <p class="aide">Envoie à un formateur un email (via le service mail commun Univers BFS)
+      contenant un lien pour choisir lui-même un nouveau mot de passe. Le mot de passe actuel
+      n'est jamais affiché ni connu de personne — c'est la seule façon de le réinitialiser.</p>
+    <table class="tableau">
+      <thead><tr><th>Nom</th><th>Prénom</th><th>Email</th><th>Rôle</th><th></th></tr></thead>
+      <tbody>
+        ${(data || []).map(f => `
+          <tr>
+            <td>${esc(f.nom)}</td><td>${esc(f.prenom)}</td><td>${esc(f.email || '—')}</td>
+            <td>${f.role === 'admin' ? 'Administrateur' : f.role === 'secretariat' ? 'Secrétariat' : 'Formateur'}</td>
+            <td>${f.email
+              ? `<button onclick="envoyerReinitMotDePasse('${esc(f.email)}', this)">🔑 Envoyer un lien de réinitialisation</button>`
+              : '<span class="aide">Pas d\'email connu</span>'}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+async function envoyerReinitMotDePasse(email, btn) {
+  if (!email) return;
+  if (!confirmer(`Envoyer un email de réinitialisation de mot de passe à ${email} ?`)) return;
+  btn.disabled = true;
+  try {
+    const { error } = await sb.auth.resetPasswordForEmail(email, {
+      redirectTo: location.origin + location.pathname,
+    });
+    if (error) throw error;
+    toast(`Email de réinitialisation envoyé à ${email}`);
+  } catch (e) {
+    erreurSupabase('Envoi du lien de réinitialisation', e);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 /* ------------------------- modale générique ------------------------ */
