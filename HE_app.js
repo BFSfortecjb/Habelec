@@ -354,21 +354,36 @@ function telechargerQrPassation() {
   lien.click();
 }
 
-// Couleur d'une puce « titre visé » selon resultats_symbole :
-//  - pas de ligne (jamais calculé)        -> gris (défaut, pas de classe)
-//  - theorie_ok === false                 -> rouge : théorie non validée
-//  - theorie_ok === true, pratique_ok === false -> rouge foncé : pratique en échec
-//    (2026-09-09, bug remonté par Jeremy : cette puce restait en vert clair
-//    "pratique en attente" au lieu de signaler l'échec)
-//  - theorie_ok === true, pratique_ok === true  -> vert foncé : titre validé
-//  - theorie_ok === true, pratique_ok === null/undefined -> vert clair : pratique en attente
+// Couleur d'une puce « titre visé » selon resultats_symbole (2026-09-09,
+// grille complète demandée par Jeremy — theorie_ok et pratique_ok sont
+// chacun true/false/NULL, NULL voulant dire "pas encore évalué") :
+//  - pas de ligne, ou theorie_ok NULL         -> gris clair : en attente
+//  - theorie_ok true,  pratique_ok NULL       -> vert clair : théorie réussie, pratique en attente
+//  - theorie_ok false, pratique_ok NULL       -> rouge clair : théorie échouée
+//  - theorie_ok true,  pratique_ok true       -> vert foncé : théorie + pratique réussies
+//  - theorie_ok false, pratique_ok false      -> rouge foncé : théorie + pratique échouées
+//  - theorie_ok false, pratique_ok true       -> orange foncé : théorie échouée, pratique réussie
+//  - theorie_ok true,  pratique_ok false      -> orange clair : théorie réussie, pratique échouée
 function classeTitre(resultat) {
-  if (!resultat || resultat.theorie_ok === null) return '';
-  if (resultat.theorie_ok === false) return 'titre-rouge';
-  if (resultat.pratique_ok === true) return 'titre-vert-fonce';
-  if (resultat.pratique_ok === false) return 'titre-pratique-ko';
-  return 'titre-vert-clair';
+  if (!resultat || resultat.theorie_ok === null || resultat.theorie_ok === undefined) return 'titre-gris-clair';
+  const t = resultat.theorie_ok, p = resultat.pratique_ok;
+  if (p === null || p === undefined) return t ? 'titre-vert-clair' : 'titre-rouge-clair';
+  if (t && p) return 'titre-vert-fonce';
+  if (!t && !p) return 'titre-rouge-fonce';
+  if (!t && p) return 'titre-orange-fonce';
+  return 'titre-orange-clair'; // t && !p
 }
+
+// Libellé humain associé à chaque classe (info-bulle des puces).
+const LIBELLE_CLASSE_TITRE = {
+  'titre-gris-clair': 'En attente (pas encore évalué)',
+  'titre-vert-clair': 'Théorie réussie, pratique en attente',
+  'titre-rouge-clair': 'Théorie échouée',
+  'titre-vert-fonce': 'Théorie et pratique réussies',
+  'titre-rouge-fonce': 'Théorie et pratique échouées',
+  'titre-orange-fonce': 'Théorie échouée, pratique réussie',
+  'titre-orange-clair': 'Théorie réussie, pratique échouée',
+};
 
 /* --------- Tableau de bord formateur : validation des titres du groupe (2026-08) ---------
  * Vue d'ensemble en tête de session — évite de parcourir stagiaire par stagiaire pour
@@ -379,13 +394,14 @@ function tableauBordGroupe(stagiaires, resultatsParStagiaire) {
   (stagiaires || []).forEach(st => {
     (st.stagiaire_symboles || []).forEach(x => {
       const code = x.symbole_code;
-      const c = (parTitre[code] ||= { total: 0, valides: 0, pratiqueAttente: 0, pratiqueKo: 0, theorieKo: 0, nonEvalues: 0 });
+      const c = (parTitre[code] ||= { total: 0, valides: 0, pratiqueAttente: 0, pratiqueKo: 0, theorieKo: 0, echecMixte: 0, nonEvalues: 0 });
       c.total++;
       switch (classeTitre((resultatsParStagiaire[st.id] || {})[code])) {
         case 'titre-vert-fonce': c.valides++; break;
         case 'titre-vert-clair': c.pratiqueAttente++; break;
-        case 'titre-pratique-ko': c.pratiqueKo++; break;
-        case 'titre-rouge': c.theorieKo++; break;
+        case 'titre-orange-clair': c.pratiqueKo++; break;
+        case 'titre-rouge-clair': c.theorieKo++; break;
+        case 'titre-rouge-fonce': case 'titre-orange-fonce': c.echecMixte++; break;
         default: c.nonEvalues++;
       }
     });
@@ -403,8 +419,8 @@ function tableauBordGroupe(stagiaires, resultatsParStagiaire) {
       <summary><b>Tableau de bord — validation des titres du groupe</b></summary>
       <table class="tableau compact">
         <thead><tr><th>Titre</th><th>Stagiaires</th><th>Validés</th>
-          <th>Théorie OK, pratique en attente</th><th>Pratique en échec</th>
-          <th>Théorie non validée</th><th>Non évalués</th></tr></thead>
+          <th>Théorie OK, pratique en attente</th><th>Théorie OK, pratique en échec</th>
+          <th>Théorie échouée</th><th>Échec mixte / atypique</th><th>Non évalués</th></tr></thead>
         <tbody>${titres.map(([code, c]) => `
           <tr>
             <td><b>${esc(libelleSymbole(code))}</b></td>
@@ -413,6 +429,7 @@ function tableauBordGroupe(stagiaires, resultatsParStagiaire) {
             <td>${c.pratiqueAttente ? `<span class="etat encours">${c.pratiqueAttente}</span>` : '—'}</td>
             <td>${c.pratiqueKo ? `<span class="etat ko">${c.pratiqueKo}</span>` : '—'}</td>
             <td>${c.theorieKo ? `<span class="etat ko">${c.theorieKo}</span>` : '—'}</td>
+            <td>${c.echecMixte ? `<span class="etat ko">${c.echecMixte}</span>` : '—'}</td>
             <td>${c.nonEvalues || '—'}</td>
           </tr>`).join('')}</tbody>
       </table>
@@ -441,10 +458,7 @@ function ligneStagiaire(st, suivi, resultatsSymboles) {
 
   return `<tr>
     <td>${esc(st.nom)}</td><td>${esc(st.prenom)}</td><td>${esc(st.fonction)}</td>
-    <td>${symb.map(x => `<span class="puce ${x.classe}" title="${x.classe === 'titre-rouge' ? 'Théorie non validée' :
-        x.classe === 'titre-vert-fonce' ? 'Titre validé (théorie + pratique)' :
-        x.classe === 'titre-pratique-ko' ? 'Théorie validée, pratique en échec' :
-        x.classe === 'titre-vert-clair' ? 'Théorie validée, pratique en attente' : 'Non évalué'}">${esc(x.libelle)}</span>`)
+    <td>${symb.map(x => `<span class="puce ${x.classe}" title="${esc(LIBELLE_CLASSE_TITRE[x.classe] || 'Non évalué')}">${esc(x.libelle)}</span>`)
       .join(' ') || '<i>aucun</i>'}</td>
     <td>${(st.domaines || []).join(', ')}</td>
     <td>${theorie}</td><td>${prat}</td>
@@ -1177,7 +1191,7 @@ async function voirCopie(stagiaireId) {
 
   const questionsParPassage = Object.fromEntries(await Promise.all(passages.map(async ep => {
     const { data: qs } = await sb.from('epreuve_questions')
-      .select('*, questions(numero, theme_code, symboles_cibles, enonce, explication, image_url, question_reponses(id, libelle, correcte)), reponses_stagiaire(reponses_ids, correcte)')
+      .select('*, questions(numero, theme_code, symboles_cibles, enonce, explication, image_url, choix_multiple, question_reponses(id, libelle, correcte)), reponses_stagiaire(reponses_ids, correcte)')
       .eq('epreuve_id', ep.id).order('position');
     return [ep.id, qs || []];
   })));

@@ -195,9 +195,10 @@ function rendreQuestion(cible) {
         <div class="numero">Question ${Q.index + 1} sur ${qs.length}
           <span class="theme">${esc(q.theme)}</span>
           ${Q.sujet.fondamentales_actives && q.fondamentale ? '<span class="puce fond">Question fondamentale</span>' : ''}</div>
-        <h2>${esc(q.enonce)}</h2>
+        <h2>${esc(q.enonce)}${q.choix_multiple
+          ? ` <span class="badge-nb-reponses">(${q.nb_bonnes_reponses || 2} RÉPONSES)</span>` : ''}</h2>
         ${q.image_url ? `<img class="vignette-question-qcm" src="${esc(q.image_url)}" alt="Illustration de la question">` : ''}
-        ${q.choix_multiple ? '<p class="aide">Plusieurs réponses possibles.</p>' : ''}
+        ${q.choix_multiple ? `<p class="aide">Coche exactement ${q.nb_bonnes_reponses || 2} réponse(s).</p>` : ''}
         <div class="propositions">${q.reponses.map(r => `
           <label class="proposition ${(q.reponse_donnee || []).includes(r.id) ? 'choisie' : ''}">
             <input type="${q.choix_multiple ? 'checkbox' : 'radio'}" name="rep" value="${r.id}"

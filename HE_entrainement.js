@@ -99,9 +99,10 @@ function rendreQuestionEntrainement(cible) {
       <article class="question">
         <div class="numero">Question ${ENT.index + 1} sur ${qs.length}
           ${q.fondamentale ? '<span class="puce fond">Question fondamentale</span>' : ''}</div>
-        <h2>${esc(q.enonce)}</h2>
+        <h2>${esc(q.enonce)}${q.choix_multiple
+          ? ` <span class="badge-nb-reponses">(${q.reponses.filter(r => r.correcte).length} RÉPONSES)</span>` : ''}</h2>
         ${q.image_url ? `<img class="vignette-question-qcm" src="${esc(q.image_url)}" alt="Illustration de la question">` : ''}
-        ${q.choix_multiple ? '<p class="aide">Plusieurs réponses possibles.</p>' : ''}
+        ${q.choix_multiple ? `<p class="aide">Coche exactement ${q.reponses.filter(r => r.correcte).length} réponse(s).</p>` : ''}
         <div class="propositions">${q.reponses.map(r => {
           const cochee = q.choix.includes(r.id);
           let classe = 'proposition';

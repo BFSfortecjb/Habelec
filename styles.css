@@ -28,6 +28,12 @@
      souhaite s'en tenir strictement aux quatre couleurs. */
   --vert:      #1c7a4a;
   --vert-fond: #e9f4ee;
+
+  /* --- orange, distinct du jaune de marque : réservé aux puces "Titres
+     visés" pour signaler les cas atypiques théorie/pratique en désaccord
+     (2026-09-09) — jamais utilisé ailleurs dans l'interface. --- */
+  --orange:      #c8630a;
+  --orange-fond: #fdece0;
 }
 
 * { box-sizing: border-box; }
@@ -148,15 +154,25 @@ button.icone:hover { background: var(--gris-fond); border-radius: 6px; }
 .puce.alerte { background: var(--jaune-fond); color: var(--jaune-fonce); font-weight: 600; }
 .puce.succes { background: var(--vert-fond); color: var(--vert); font-weight: 600; }
 
-/* Statut de validation d'un titre visé, dans la liste des stagiaires :
-   gris (par défaut) = non évalué, vert clair = théorie validée (pratique en
-   attente), vert foncé = théorie + pratique validées, rouge = théorie non
-   validée (la pratique de ce titre devient sans objet, sauf rattrapage),
-   rouge foncé = théorie validée mais pratique en échec (2026-09-09). */
+/* Statut de validation d'un titre visé, dans la liste des stagiaires —
+   grille complète théorie × pratique (2026-09-09, demande de Jeremy) :
+     gris clair   = en attente, pas encore évalué
+     vert clair   = théorie réussie, pratique en attente
+     rouge clair  = théorie échouée (pratique pas encore attendue)
+     vert foncé   = théorie + pratique réussies
+     rouge foncé  = théorie + pratique échouées
+     orange foncé = théorie échouée, pratique réussie (cas atypique)
+     orange clair = théorie réussie, pratique échouée
+   Les tons foncés (résultat définitif : réussite totale ou échec avéré sur
+   les deux volets) sont pleins ; les tons clairs (attente ou désaccord
+   partiel) restent en fond pâle + texte coloré. */
+.puce.titre-gris-clair { background: var(--gris-fond); color: var(--gris-doux); font-weight: 600; }
 .puce.titre-vert-clair { background: var(--vert-fond); color: var(--vert); font-weight: 600; }
+.puce.titre-rouge-clair { background: var(--rouge-fond); color: var(--rouge); font-weight: 600; }
 .puce.titre-vert-fonce { background: var(--vert); color: #fff; font-weight: 700; }
-.puce.titre-rouge { background: var(--rouge-fond); color: var(--rouge); font-weight: 700; }
-.puce.titre-pratique-ko { background: var(--rouge); color: #fff; font-weight: 700; }
+.puce.titre-rouge-fonce { background: var(--rouge); color: #fff; font-weight: 700; }
+.puce.titre-orange-fonce { background: var(--orange); color: #fff; font-weight: 700; }
+.puce.titre-orange-clair { background: var(--orange-fond); color: var(--orange); font-weight: 600; }
 
 .aide { color: var(--gris-doux); font-size: 13.5px; }
 .chargement { color: var(--gris-doux); font-style: italic; }
@@ -337,6 +353,10 @@ details h4 { margin-top: 14px; font-size: 13px; color: var(--gris-doux); }
   padding: 1px 8px; border-radius: 20px; margin-left: 8px;
 }
 .question h2 { font-size: 19px; margin-bottom: 16px; color: var(--noir); }
+.badge-nb-reponses {
+  display: inline-block; font-size: 13px; font-weight: 700; color: var(--jaune-fonce);
+  background: var(--jaune-fond); border-radius: 6px; padding: 1px 8px; vertical-align: middle;
+}
 .proposition {
   display: flex; align-items: flex-start; gap: 12px; padding: 13px 16px;
   border: 1px solid var(--gris-bord); border-radius: 10px; margin-bottom: 9px; cursor: pointer;
