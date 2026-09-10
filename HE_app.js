@@ -2361,6 +2361,40 @@ function extraireEmailCompteService(json) {
   try { return JSON.parse(json).client_email || ''; } catch { return ''; }
 }
 
+// 2026-09-10 (retour OAuth, cf. HE_config.js) : URI de redirection FIXE que
+// la fonction habelec-drive-oauth-callback utilise pour échanger le code
+// Google contre un refresh_token — doit être déclarée à l'identique dans
+// Google Cloud Console (Identifiants → ID client OAuth → URI de redirection
+// autorisées), sinon Google refuse l'échange. Construite avec la clé anon
+// "historique" (JWT), car c'est celle que l'environnement des Edge
+// Functions Supabase expose toujours sous SUPABASE_ANON_KEY, quel que soit
+// le type de clé publique utilisé côté client (voir CONFIG.SUPABASE_ANON_KEY).
+const CLE_ANON_HISTORIQUE_EDGE = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRxcmFvYndvem93dG5yaWVpdGtwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3MjYyMDcsImV4cCI6MjA5ODMwMjIwN30.Nz_m0gx8Pw-lqhXLfyzZv3Gol7BN6d-vn-BPjktPWzk';
+const URI_REDIRECTION_DRIVE = `${CONFIG.SUPABASE_URL}/functions/v1/habelec-drive-oauth-callback?apikey=${CLE_ANON_HISTORIQUE_EDGE}`;
+
+function copierUriRedirectionDrive() {
+  navigator.clipboard.writeText(URI_REDIRECTION_DRIVE);
+  toast('URI de redirection copiée');
+}
+
+// Ouvre l'écran de consentement Google — l'utilisateur choisit son compte
+// Google (celui qui a accès au Drive/dossier voulu), autorise l'accès, et
+// habelec-drive-oauth-callback enregistre le refresh_token obtenu.
+function connecterGoogleDrive(organismeId) {
+  const clientId = document.querySelector('#form-organisme [name="drive_client_id"]')?.value.trim();
+  if (!clientId) return toast('Renseigne et enregistre d\'abord l\'ID client OAuth ci-dessus', 'erreur');
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: URI_REDIRECTION_DRIVE,
+    response_type: 'code',
+    access_type: 'offline',
+    prompt: 'consent',
+    scope: 'https://www.googleapis.com/auth/drive',
+    state: organismeId,
+  });
+  window.open(`https://accounts.google.com/o/oauth2/v2/auth?${params}`, '_blank');
+}
+
 async function rendreOrganisme(zone) {
   const o = S.organisme || {};
   zone.innerHTML = `
@@ -2426,24 +2460,50 @@ async function rendreOrganisme(zone) {
         <button type="button" class="lien" onclick="copierLienEntrainementPermanent()">Copier le lien</button>
         <button type="button" class="lien" onclick="telechargerQrEntrainementPermanent()">Télécharger l'image</button>
       </fieldset>
-      <fieldset><legend>Sauvegarde automatique sur Google Drive (compte de service) — un
+      <fieldset><legend>Sauvegarde automatique sur Google Drive — un
         dossier par session, avec les PDF des stagiaires et un fichier session.json
         réimportable en cas de purge</legend>
-        <label>Clé JSON du compte de service Google
-          <textarea name="drive_service_account_json" rows="3" placeholder="${o.drive_service_account_json ? '•••••••• (déjà enregistrée, laisser vide pour garder)' : 'Colle ici tout le contenu du fichier JSON téléchargé'}"></textarea>
-        </label>
-        <label>ID du dossier Drive racine
+        <p class="aide">Méthode recommandée depuis le 2026-09-10 : connexion avec ton propre
+          compte Google (OAuth), qui utilise ton quota de stockage personnel — fonctionne avec
+          un Drive classique ou un Drive partagé. L'ancienne méthode "compte de service" ci-dessous
+          ne fonctionne plus si ton organisation Google Workspace bloque la création de clés de
+          compte de service (politique <code>iam.disableServiceAccountKeyCreation</code>).</p>
+        <label>ID du dossier (ou Drive partagé) racine
           <input name="drive_dossier_racine_id" value="${esc(o.drive_dossier_racine_id)}"
             placeholder="ex : 1AbCdEfGhIjKlmnOpQrSt (dans l'URL du dossier, après /folders/)"></label>
-        <p class="aide">1. Dans <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank">Google Cloud Console → Comptes de service</a>,
-          crée un compte de service, génère une clé JSON et colle tout son contenu ci-dessus.
-          2. Crée un dossier dans ton Google Drive, clique "Partager" et ajoute l'adresse email
-          du compte de service (visible dans le fichier JSON, champ "client_email") en Éditeur.
-          3. Colle l'ID de ce dossier ci-dessus (dans son URL, après /folders/). Pas d'écran de
-          consentement à valider : ça fonctionne dès l'enregistrement de ce formulaire.</p>
-        <p>Statut : ${o.drive_service_account_json
-          ? '<span style="color:var(--vert);font-weight:700">✅ Configuré</span>' + (extraireEmailCompteService(o.drive_service_account_json) ? ` — compte de service : <code>${esc(extraireEmailCompteService(o.drive_service_account_json))}</code>` : '')
-          : '<span style="color:var(--rouge);font-weight:700">◻️ Non configuré</span>'}</p>
+        <div class="grille-2">
+          <label>ID client OAuth (Google Cloud Console)
+            <input name="drive_client_id" value="${esc(o.drive_client_id)}" placeholder="xxxx.apps.googleusercontent.com"></label>
+          <label>Code secret du client OAuth
+            <input name="drive_client_secret" placeholder="${o.drive_client_secret ? '•••••••• (déjà enregistré, laisser vide pour garder)' : 'colle ici le code secret (GOCSPX-...)'}"></label>
+        </div>
+        <p class="aide">1. Dans <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console → API et services → Identifiants</a>,
+          crée un "ID client OAuth" de type <b>Application Web</b>.
+          2. Dans "URI de redirection autorisées", ajoute EXACTEMENT :
+          <code id="uri-redirection-drive">${esc(URI_REDIRECTION_DRIVE)}</code>
+          <button type="button" class="lien" onclick="copierUriRedirectionDrive()">Copier</button>.
+          3. Colle ci-dessus l'ID client et le code secret affichés par Google, puis clique
+          "Enregistrer" en bas de ce formulaire.
+          4. Clique ensuite sur "Connecter Google Drive" ci-dessous et autorise l'accès, avec le
+          compte Google qui a accès au dossier/Drive partagé indiqué plus haut.</p>
+        <p>Statut OAuth : ${o.drive_refresh_token
+          ? '<span style="color:var(--vert);font-weight:700">✅ Connecté</span>'
+          : '<span style="color:var(--rouge);font-weight:700">◻️ Non connecté</span>'}</p>
+        <button type="button" onclick="connecterGoogleDrive('${esc(o.id)}')">🔗 Connecter Google Drive</button>
+
+        <details style="margin-top:14px">
+          <summary>Autre méthode (avancée) : compte de service — nécessite un Drive PARTAGÉ (Workspace)</summary>
+          <label>Clé JSON du compte de service Google
+            <textarea name="drive_service_account_json" rows="3" placeholder="${o.drive_service_account_json ? '•••••••• (déjà enregistrée, laisser vide pour garder)' : 'Colle ici tout le contenu du fichier JSON téléchargé'}"></textarea>
+          </label>
+          <p class="aide">Utilisée seulement si aucune connexion OAuth n'est active ci-dessus.
+            Nécessite un Drive PARTAGÉ (fonctionnalité Google Workspace) partagé en Éditeur avec
+            l'adresse "client_email" de la clé — un compte de service n'a pas de quota de stockage
+            propre sur un Drive personnel classique.</p>
+          <p>Statut : ${o.drive_service_account_json
+            ? '<span style="color:var(--vert);font-weight:700">✅ Configuré</span>' + (extraireEmailCompteService(o.drive_service_account_json) ? ` — compte de service : <code>${esc(extraireEmailCompteService(o.drive_service_account_json))}</code>` : '')
+            : '<span style="color:var(--rouge);font-weight:700">◻️ Non configuré</span>'}</p>
+        </details>
       </fieldset>
       <button class="principal" type="submit">Enregistrer</button>
     </form>`;
@@ -2470,6 +2530,7 @@ async function rendreOrganisme(zone) {
     ev.preventDefault();
     const f = ev.target;
     const driveJsonSaisi = f.drive_service_account_json.value.trim();
+    const driveSecretSaisi = f.drive_client_secret.value.trim();
     const donnees = {
       raison_sociale: f.raison_sociale.value.trim(),
       adresse: f.adresse.value.trim(),
@@ -2482,6 +2543,7 @@ async function rendreOrganisme(zone) {
       cachet_data: lireImage('cachet-organisme'),
       cachet_data_briec: lireImage('cachet-organisme-briec'),
       drive_dossier_racine_id: f.drive_dossier_racine_id.value.trim() || null,
+      drive_client_id: f.drive_client_id.value.trim() || null,
       fondamentales_actives: f.fondamentales_actives.checked,
       entrainement_permanent_actif: f.entrainement_permanent_actif.checked,
       seuil_reussite_defaut: Math.max(1, Math.min(100, parseInt(f.seuil_reussite_defaut.value, 10) || 70)) / 100,
@@ -2492,6 +2554,9 @@ async function rendreOrganisme(zone) {
     // recollé quelque chose (2026-08-28).
     if (driveJsonSaisi) {
       donnees.drive_service_account_json = driveJsonSaisi;
+    }
+    if (driveSecretSaisi) {
+      donnees.drive_client_secret = driveSecretSaisi;
     }
     const { error } = await sb.from('organismes').update(donnees).eq('id', o.id);
     if (error) return erreurSupabase('Enregistrement', error);
