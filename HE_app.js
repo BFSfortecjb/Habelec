@@ -983,13 +983,21 @@ async function envoyerSecretariat() {
     const echecs = [];
     for (const id of idsChoisis) {
       try {
-        const avis = await genererTitrePdf(id, { sauvegarder: true });
+        const avis = await genererTitrePdf(id, { sauvegarder: false });
         if (!avis?.doc) { echecs.push(id); continue; }
-        const preuve = await genererPreuveExamenPdf(id, { sauvegarder: true });
+        const preuve = await genererPreuveExamenPdf(id, { sauvegarder: false });
         piecesJointes.push(
           { nom: avis.nomFichier, base64: avis.doc.output('datauristring').split(',')[1] },
           { nom: preuve.nomFichier, base64: preuve.doc.output('datauristring').split(',')[1] },
         );
+        // 2026-09-10 (demande de Jeremy) : sauvegarde Drive à l'envoi
+        // secrétariat aussi — appelée ici (et non via sauvegarder:true, qui
+        // relancerait un téléchargement local en double) et attendue
+        // (await) une par une pour ne jamais avoir deux appels concurrents
+        // qui créeraient chacun un dossier de session en double sur Drive.
+        const nomDossier = nomDossierSession(s);
+        await sauvegarderDocumentDrive(s.id, avis.nomFichier, avis.doc, nomDossier);
+        await sauvegarderDocumentDrive(s.id, preuve.nomFichier, preuve.doc, nomDossier);
       } catch (e) {
         DEBUG.erreur('envoyerSecretariat — génération PDF', e.message);
         echecs.push(id);

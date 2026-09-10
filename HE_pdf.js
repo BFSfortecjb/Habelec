@@ -22,6 +22,16 @@ const PDF_VERSION = 'v24-2026-09-03';
 // PDF stagiaires sur Google Drive (compte de service configuré dans l'onglet
 // Organisme) — jamais bloquant, une erreur ici ne doit jamais empêcher la
 // génération ni le téléchargement du PDF lui-même.
+// 2026-09-10 (demande de Jeremy) : le dossier Drive de la session doit
+// s'appeler avec son numéro de session Galaxy devant, pas seulement son
+// intitulé (qui peut être identique d'une session à l'autre, ex. plusieurs
+// "Habilitation électrique — recyclage électricien").
+function nomDossierSession(session) {
+  const galaxy = (session?.numero_session_galaxy || '').toString().trim();
+  const intitule = (session?.intitule || '').toString().trim();
+  return [galaxy, intitule].filter(Boolean).join(' — ') || null;
+}
+
 async function sauvegarderDocumentDrive(sessionId, nomFichier, doc, nomSession) {
   if (!sessionId) return;
   try {
@@ -855,7 +865,7 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
   if (sauvegarder) {
     doc.save(nomFichier);
     toast('Titre et avis d\'habilitation générés');
-    sauvegarderDocumentDrive(st.session_id, nomFichier, doc, session?.intitule);
+    sauvegarderDocumentDrive(st.session_id, nomFichier, doc, nomDossierSession(session));
   }
   return { doc, nomFichier, stagiaire: st };
 }
@@ -1171,7 +1181,7 @@ async function genererPreuveExamenPdf(stagiaireId, { sauvegarder = true } = {}) 
   if (sauvegarder) {
     doc.save(nomFichier);
     toast('Preuve d\'examen générée');
-    sauvegarderDocumentDrive(stagiaire?.session_id, nomFichier, doc, session?.intitule);
+    sauvegarderDocumentDrive(stagiaire?.session_id, nomFichier, doc, nomDossierSession(session));
   }
   return { doc, nomFichier };
 }
