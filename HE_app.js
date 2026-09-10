@@ -2369,7 +2369,10 @@ function extraireEmailCompteService(json) {
 // "historique" (JWT), car c'est celle que l'environnement des Edge
 // Functions Supabase expose toujours sous SUPABASE_ANON_KEY, quel que soit
 // le type de clé publique utilisé côté client (voir CONFIG.SUPABASE_ANON_KEY).
-const CLE_ANON_HISTORIQUE_EDGE = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRxcmFvYndvem93dG5yaWVpdGtwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3MjYyMDcsImV4cCI6MjA5ODMwMjIwN30.Nz_m0gx8Pw-lqhXLfyzZv3Gol7BN6d-vn-BPjktPWzk';
+// Doit être identique à ce que Deno.env.get('SUPABASE_ANON_KEY') renvoie côté
+// fonction Edge (habelec-drive-oauth-callback) : depuis le passage aux nouvelles
+// clés Supabase, c'est la clé publique (sb_publishable_...), plus le vieux JWT.
+const CLE_ANON_HISTORIQUE_EDGE = 'sb_publishable_UhkImOyooXPnAqTCNMJ4wA_VVqscCmK';
 const URI_REDIRECTION_DRIVE = `${CONFIG.SUPABASE_URL}/functions/v1/habelec-drive-oauth-callback?apikey=${CLE_ANON_HISTORIQUE_EDGE}`;
 
 function copierUriRedirectionDrive() {
