@@ -318,6 +318,8 @@ async function rendreDetailSession(zone) {
           <input type="file" accept=".xlsx,.xls,.csv" hidden onchange="importerStagiairesExcel(this)"></label>
         <button title="Envoie l'avis d'habilitation + la preuve d'examen de chaque stagiaire ayant un titre au secrétariat"
           onclick="envoyerSecretariat()">✉️ Envoi secrétariat</button>
+        ${S.organisme?.drive_bouton_test_actif ? `<button title="Envoie un petit fichier de test dans le dossier Drive de cette session, sans envoyer aucun mail — pour vérifier la configuration Google Drive"
+          onclick="testerSauvegardeDrive()">☁️ Tester Drive</button>` : ''}
         <button title="Télécharge un ZIP avec l'avis d'habilitation + la preuve d'examen de chaque stagiaire ayant un titre"
           onclick="telechargerZipTitres()">🗜 Télécharger ZIP</button>
         <button class="principal" onclick="nouveauStagiaire()">+ Ajouter</button>
@@ -928,6 +930,39 @@ async function telechargerZipTitres() {
       + echecs.map(({ st, raison }) => `${st.nom} ${st.prenom} (${raison})`).join(' ; '), 'erreur', 10000);
   } else {
     toast(`ZIP généré pour ${genereCount} stagiaire(s)`);
+  }
+}
+
+// 2026-09-10 (demande de Jeremy) : bouton de test de la sauvegarde Drive,
+// pour vérifier la configuration (OAuth/compte de service, dossier racine…)
+// sans avoir à envoyer un vrai mail au secrétariat à chaque essai. Envoie un
+// petit fichier texte dans le dossier de LA session en cours, et affiche
+// clairement le résultat (succès ou message d'erreur précis), contrairement
+// à sauvegarderDocumentDrive (best-effort, silencieuse) utilisée ailleurs.
+async function testerSauvegardeDrive() {
+  const s = S.session;
+  if (!s) return;
+  toast('Test d\'envoi vers Google Drive…');
+  try {
+    const horodatage = new Date().toLocaleString('fr-FR');
+    const texte = `Fichier de test — BFS Habelec\nSession : ${s.intitule || ''} `
+      + `(n° Galaxy ${s.numero_session_galaxy || '—'})\nEnvoyé le ${horodatage}\n\n`
+      + `Si tu vois ce fichier dans le bon dossier Drive, la connexion fonctionne.`;
+    const contenuBase64 = btoa(unescape(encodeURIComponent(texte)));
+    const { data, error } = await sb.functions.invoke('habelec-sauvegarder-drive', {
+      body: {
+        session_id: s.id,
+        nom_fichier: `test-connexion-drive_${Date.now()}.txt`,
+        mime_type: 'text/plain',
+        contenu_base64: contenuBase64,
+        nom_session: nomDossierSession(s),
+      },
+    });
+    if (error) throw error;
+    if (data?.ok === false) throw new Error(data.erreur || 'échec inconnu');
+    toast('✅ Test réussi : fichier envoyé sur Google Drive', 'ok', 6000);
+  } catch (e) {
+    erreurSupabase('Test sauvegarde Drive', e);
   }
 }
 
@@ -2502,6 +2537,11 @@ async function rendreOrganisme(zone) {
           : '<span style="color:var(--rouge);font-weight:700">◻️ Non connecté</span>'}</p>
         <button type="button" onclick="connecterGoogleDrive('${esc(o.id)}')">🔗 Connecter Google Drive</button>
 
+        <label class="case" style="margin-top:10px">
+          <input type="checkbox" name="drive_bouton_test_actif" ${o.drive_bouton_test_actif ? 'checked' : ''}>
+          Afficher le bouton « ☁️ Tester Drive » sur l'écran de session (envoie un petit fichier de
+          test dans le dossier Drive de la session, sans envoyer aucun mail)</label>
+
         <details style="margin-top:14px">
           <summary>Autre méthode (avancée) : compte de service — nécessite un Drive PARTAGÉ (Workspace)</summary>
           <label>Clé JSON du compte de service Google
@@ -2555,6 +2595,7 @@ async function rendreOrganisme(zone) {
       cachet_data_briec: lireImage('cachet-organisme-briec'),
       drive_dossier_racine_id: f.drive_dossier_racine_id.value.trim() || null,
       drive_client_id: f.drive_client_id.value.trim() || null,
+      drive_bouton_test_actif: f.drive_bouton_test_actif.checked,
       fondamentales_actives: f.fondamentales_actives.checked,
       entrainement_permanent_actif: f.entrainement_permanent_actif.checked,
       seuil_reussite_defaut: Math.max(1, Math.min(100, parseInt(f.seuil_reussite_defaut.value, 10) || 70)) / 100,
