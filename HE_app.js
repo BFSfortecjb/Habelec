@@ -983,9 +983,9 @@ async function envoyerSecretariat() {
     const echecs = [];
     for (const id of idsChoisis) {
       try {
-        const avis = await genererTitrePdf(id, { sauvegarder: false });
+        const avis = await genererTitrePdf(id, { sauvegarder: true });
         if (!avis?.doc) { echecs.push(id); continue; }
-        const preuve = await genererPreuveExamenPdf(id, { sauvegarder: false });
+        const preuve = await genererPreuveExamenPdf(id, { sauvegarder: true });
         piecesJointes.push(
           { nom: avis.nomFichier, base64: avis.doc.output('datauristring').split(',')[1] },
           { nom: preuve.nomFichier, base64: preuve.doc.output('datauristring').split(',')[1] },
