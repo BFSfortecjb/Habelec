@@ -1210,3 +1210,206 @@ async function genererPvSession() {
   });
   doc.save(`pv_${S.session.intitule}.pdf`.replace(/\s+/g, '_'));
 }
+
+/* ------------------- 4. Récapitulatif de session (secrétariat) ------
+ * 2026-09-18 (demande de Jeremy) : une page de synthèse par session — tous
+ * les stagiaires, chaque titre visé, validé ou non, avec la recommandation
+ * du formateur pour chaque titre non validé. Utilisée pour l'envoi
+ * secrétariat et le ZIP de fin de session. Distincte du PV d'évaluation
+ * (genererPvSession, ci-dessus) qui ne donne qu'un résultat global par
+ * stagiaire — pas le détail par titre ni les recommandations.
+ * Une ligne par couple stagiaire × titre (demande explicite de Jeremy),
+ * donc pas de garantie stricte de tenir sur une seule page avec beaucoup de
+ * stagiaires/titres — le tableau continue simplement sur une 2e page le cas
+ * échéant plutôt que de tronquer les données. */
+async function construireDocRecapSessionPdf() {
+  const s = S.session;
+  const { data: stagiaires } = await sb.from('stagiaires')
+    .select('id, nom, prenom').eq('session_id', s.id).order('nom');
+  const ids = (stagiaires || []).map(st => st.id);
+  if (!ids.length) return null;
+
+  const [{ data: resultats }, { data: pratiques }] = await Promise.all([
+    sb.from('resultats_symbole')
+      .select('stagiaire_id, symbole_code, avis, preconisation').in('stagiaire_id', ids),
+    sb.from('epreuves_pratiques')
+      .select('stagiaire_id, gabarit_code, recommandation').in('stagiaire_id', ids),
+  ]);
+  if (!(resultats || []).length) return { vide: true };
+
+  // Recommandation par stagiaire+titre : préconisation théorique
+  // (resultats_symbole) sinon recommandation pratique (epreuves_pratiques,
+  // reliée au symbole via le référentiel gabarit → symbole) — même logique
+  // de fusion que genererTitrePdf, voir plus haut.
+  const recoParCle = {};
+  (resultats || []).forEach(r => {
+    if (r.preconisation) recoParCle[`${r.stagiaire_id}|${r.symbole_code}`] = r.preconisation;
+  });
+  (pratiques || []).forEach(p => {
+    if (!p.recommandation) return;
+    Object.entries(S.referentiel.gabaritsParSymbole || {})
+      .filter(([, gabarits]) => gabarits.includes(p.gabarit_code))
+      .forEach(([sym]) => {
+        const cle = `${p.stagiaire_id}|${sym}`;
+        if (!recoParCle[cle]) recoParCle[cle] = p.recommandation;
+      });
+  });
+
+  const lignes = [];
+  const parStagiaire = {};
+  (resultats || []).forEach(r => { (parStagiaire[r.stagiaire_id] ||= []).push(r); });
+  (stagiaires || []).forEach(st => {
+    (parStagiaire[st.id] || []).sort((a, b) => a.symbole_code.localeCompare(b.symbole_code)).forEach(r => {
+      const valide = r.avis === 'favorable';
+      lignes.push([
+        st.nom, st.prenom, libelleSymbole(r.symbole_code),
+        valide ? 'Validé' : 'Non validé',
+        valide ? '' : (recoParCle[`${st.id}|${r.symbole_code}`] || '—'),
+      ]);
+    });
+  });
+  if (!lignes.length) return { vide: true };
+
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const largeur = doc.internal.pageSize.getWidth();
+  doc.setFont('helvetica', 'bold').setFontSize(14);
+  doc.text('RÉCAPITULATIF DE SESSION', largeur / 2, 16, { align: 'center' });
+  doc.setFont('helvetica', 'normal').setFontSize(10);
+  doc.text(`${s.intitule || ''} — n° Galaxy ${s.numero_session_galaxy || '—'} — ${dateFr(s.date_debut)}`,
+    largeur / 2, 23, { align: 'center' });
+
+  doc.autoTable({
+    startY: 30, margin: { left: 10, right: 10 }, theme: 'grid',
+    styles: { fontSize: 8, cellPadding: 1.5, overflow: 'linebreak' },
+    headStyles: { fillColor: BFS.jaune, textColor: BFS.noir, fontStyle: 'bold' },
+    columnStyles: {
+      0: { cellWidth: 32 }, 1: { cellWidth: 32 }, 2: { cellWidth: 75 },
+      3: { cellWidth: 26 }, 4: { cellWidth: 'auto' },
+    },
+    head: [['Nom', 'Prénom', 'Titre', 'Résultat', 'Recommandation (si non validé)']],
+    body: lignes,
+    didParseCell: data => {
+      if (data.section === 'body' && data.column.index === 3) {
+        data.cell.styles.textColor = data.cell.raw === 'Validé' ? BFS.vert : BFS.rouge;
+        data.cell.styles.fontStyle = 'bold';
+      }
+    },
+  });
+
+  piedDeVersion(doc, largeur, 10, doc.internal.pageSize.getHeight() - 6);
+  const nomFichier = `recap_session_${(s.numero_session_galaxy || s.code_acces || 'session')}.pdf`.replace(/\s+/g, '_');
+  return { doc, nomFichier };
+}
+
+async function genererRecapSessionPdf({ sauvegarder = true } = {}) {
+  const res = await construireDocRecapSessionPdf();
+  if (!res || res.vide) { toast('Aucun résultat à récapituler pour cette session', 'erreur'); return null; }
+  const { doc, nomFichier } = res;
+  if (sauvegarder) {
+    doc.save(nomFichier);
+    toast('Récapitulatif de session généré');
+    sauvegarderDocumentDrive(S.session.id, nomFichier, doc, nomDossierSession(S.session));
+  }
+  return { doc, nomFichier };
+}
+
+/* ------------------- 5. Copie de QCM (archivage secrétariat) --------
+ * 2026-09-18 (demande de Jeremy) : copie complète d'examen d'un stagiaire —
+ * chaque question, l'énoncé, les réponses cochées et la correction — pour
+ * archivage par le secrétariat. Distincte de construireDocPreuveExamen
+ * (ci-dessus), qui n'est qu'un score/synthèse par titre, pas le détail
+ * question par question. Reprend la logique de données de voirCopie()
+ * (HE_app.js, écran de correction du formateur). */
+async function construireDocCopieQcmPdf(stagiaireId) {
+  const { data: st } = await sb.from('stagiaires').select('nom, prenom, session_id').eq('id', stagiaireId).single();
+  if (!st) return null;
+  const { data: eps } = await sb.from('epreuves_theoriques')
+    .select('*').eq('stagiaire_id', stagiaireId).in('type_epreuve', ['initiale', 'rattrapage']);
+  const epInit = (eps || []).find(e => e.type_epreuve === 'initiale');
+  const epRatt = (eps || []).find(e => e.type_epreuve === 'rattrapage');
+  if (!epInit) return null;
+  const passages = [epInit, epRatt].filter(Boolean);
+
+  const questionsParPassage = Object.fromEntries(await Promise.all(passages.map(async ep => {
+    const { data: qs } = await sb.from('epreuve_questions')
+      .select('*, questions(numero, theme_code, enonce, explication, question_reponses(id, libelle, correcte)), reponses_stagiaire(reponses_ids, correcte)')
+      .eq('epreuve_id', ep.id).order('position');
+    return [ep.id, qs || []];
+  })));
+
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const largeur = doc.internal.pageSize.getWidth();
+  const hauteurPage = doc.internal.pageSize.getHeight();
+  const marge = 14;
+  let y = 16;
+
+  doc.setFont('helvetica', 'bold').setFontSize(13).setTextColor(...BFS.noir);
+  doc.text('COPIE DE QCM — ARCHIVAGE', largeur / 2, y, { align: 'center' });
+  y += 7;
+  doc.setFont('helvetica', 'normal').setFontSize(10);
+  doc.text(`${st.nom} ${st.prenom}`, largeur / 2, y, { align: 'center' });
+  y += 10;
+
+  const libellePassage = { initiale: 'Passage initial', rattrapage: 'Rattrapage' };
+
+  passages.forEach(ep => {
+    const questions = questionsParPassage[ep.id] || [];
+    if (y > hauteurPage - 40) { doc.addPage(); y = 16; }
+    doc.setFont('helvetica', 'bold').setFontSize(11).setTextColor(...BFS.noir);
+    doc.text(libellePassage[ep.type_epreuve] || ep.type_epreuve, marge, y);
+    y += 6;
+
+    questions.forEach((q, i) => {
+      const donnees = q.reponses_stagiaire?.reponses_ids || [];
+      const idsValides = new Set((q.questions.question_reponses || []).map(r => r.id));
+      const sansReponse = !donnees.some(id => idsValides.has(id));
+      const juste = q.reponses_stagiaire?.correcte;
+      const resultat = sansReponse ? 'SANS RÉPONSE' : (juste ? 'CORRECT' : 'INCORRECT');
+      const couleurResultat = sansReponse ? BFS.gris : (juste ? BFS.vert : BFS.rouge);
+
+      const enonceLignes = doc.splitTextToSize(
+        `${i + 1}. ${q.questions.enonce || ''}${q.fondamentale ? '  [fondamentale]' : ''}`,
+        largeur - marge * 2 - 32);
+      const hauteurChoix = (q.questions.question_reponses || [])
+        .reduce((h, r) => h + doc.splitTextToSize(r.libelle || '', largeur - marge * 2 - 8).length * 4.2, 0);
+      const hauteurBloc = enonceLignes.length * 4.5 + hauteurChoix + 8;
+      if (y + hauteurBloc > hauteurPage - 14) { doc.addPage(); y = 16; }
+
+      doc.setFont('helvetica', 'bold').setFontSize(9).setTextColor(...BFS.noir);
+      doc.text(enonceLignes, marge, y);
+      doc.setTextColor(...couleurResultat).setFont('helvetica', 'bold').setFontSize(8);
+      doc.text(resultat, largeur - marge, y, { align: 'right' });
+      y += enonceLignes.length * 4.5 + 1;
+
+      doc.setFont('helvetica', 'normal').setFontSize(8.5);
+      (q.questions.question_reponses || []).forEach(r => {
+        const cochee = donnees.includes(r.id);
+        const marque = cochee ? '☑' : '☐';
+        const precision = r.correcte ? ' (bonne réponse)' : (cochee ? ' (coché, incorrect)' : '');
+        doc.setTextColor(...(r.correcte ? BFS.vert : (cochee ? BFS.rouge : BFS.noir)));
+        const ligne = doc.splitTextToSize(`${marque} ${r.libelle || ''}${precision}`, largeur - marge * 2 - 8);
+        doc.text(ligne, marge + 4, y);
+        y += ligne.length * 4.2;
+      });
+      doc.setTextColor(...BFS.noir);
+      y += 3;
+    });
+    y += 4;
+  });
+
+  piedDeVersion(doc, largeur, marge, hauteurPage - 6);
+  const nomFichier = `copie_qcm_${st.nom}_${st.prenom}.pdf`.replace(/\s+/g, '_');
+  return { doc, nomFichier, sessionId: st.session_id };
+}
+
+async function genererCopieQcmPdf(stagiaireId, { sauvegarder = true } = {}) {
+  const res = await construireDocCopieQcmPdf(stagiaireId);
+  if (!res) { toast('Aucun sujet généré pour ce stagiaire', 'erreur'); return null; }
+  const { doc, nomFichier, sessionId } = res;
+  if (sauvegarder) {
+    doc.save(nomFichier);
+    toast('Copie de QCM générée');
+    sauvegarderDocumentDrive(sessionId, nomFichier, doc, nomDossierSession(S.session));
+  }
+  return { doc, nomFichier };
+}

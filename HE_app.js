@@ -952,10 +952,23 @@ async function telechargerZipTitres() {
       const preuve = await genererPreuveExamenPdf(st.id, { sauvegarder: false });
       zip.file(avis.nomFichier, avis.doc.output('arraybuffer'));
       zip.file(preuve.nomFichier, preuve.doc.output('arraybuffer'));
+      // 2026-09-18 (demande de Jeremy) : copie de QCM complète de ce
+      // stagiaire incluse elle aussi, pour archivage secrétariat.
+      const copie = await genererCopieQcmPdf(st.id, { sauvegarder: false });
+      if (copie?.doc) zip.file(copie.nomFichier, copie.doc.output('arraybuffer'));
     } catch (e) {
       DEBUG.erreur('telechargerZipTitres — génération PDF', e.message);
       echecs.push({ st, raison: e.message });
     }
+  }
+
+  // 2026-09-18 (demande de Jeremy) : récapitulatif de session (1 page,
+  // titres validés/non validés + recommandations) inclus une seule fois.
+  try {
+    const recap = await genererRecapSessionPdf({ sauvegarder: false });
+    if (recap?.doc) zip.file(recap.nomFichier, recap.doc.output('arraybuffer'));
+  } catch (e) {
+    DEBUG.erreur('telechargerZipTitres — récapitulatif de session', e.message);
   }
 
   if (!zip.files || !Object.keys(zip.files).length) {
@@ -1061,6 +1074,7 @@ async function envoyerSecretariat() {
 
     const piecesJointes = [];
     const echecs = [];
+    const nomDossier = nomDossierSession(s);
     for (const id of idsChoisis) {
       try {
         const avis = await genererTitrePdf(id, { sauvegarder: false });
@@ -1075,9 +1089,16 @@ async function envoyerSecretariat() {
         // relancerait un téléchargement local en double) et attendue
         // (await) une par une pour ne jamais avoir deux appels concurrents
         // qui créeraient chacun un dossier de session en double sur Drive.
-        const nomDossier = nomDossierSession(s);
         await sauvegarderDocumentDrive(s.id, avis.nomFichier, avis.doc, nomDossier);
         await sauvegarderDocumentDrive(s.id, preuve.nomFichier, preuve.doc, nomDossier);
+
+        // 2026-09-18 (demande de Jeremy) : copie de QCM complète de ce
+        // stagiaire jointe elle aussi, pour archivage secrétariat.
+        const copie = await genererCopieQcmPdf(id, { sauvegarder: false });
+        if (copie?.doc) {
+          piecesJointes.push({ nom: copie.nomFichier, base64: copie.doc.output('datauristring').split(',')[1] });
+          await sauvegarderDocumentDrive(s.id, copie.nomFichier, copie.doc, nomDossier);
+        }
       } catch (e) {
         DEBUG.erreur('envoyerSecretariat — génération PDF', e.message);
         echecs.push(id);
@@ -1087,12 +1108,26 @@ async function envoyerSecretariat() {
       return toast('Aucun document généré — envoi annulé (voir le journal de debug)', 'erreur');
     }
 
+    // 2026-09-18 (demande de Jeremy) : récapitulatif de session (1 page,
+    // titres validés/non validés + recommandations) joint une seule fois,
+    // pour l'ensemble des stagiaires de la session — pas par stagiaire.
+    try {
+      const recap = await genererRecapSessionPdf({ sauvegarder: false });
+      if (recap?.doc) {
+        piecesJointes.push({ nom: recap.nomFichier, base64: recap.doc.output('datauristring').split(',')[1] });
+        await sauvegarderDocumentDrive(s.id, recap.nomFichier, recap.doc, nomDossier);
+      }
+    } catch (e) {
+      DEBUG.erreur('envoyerSecretariat — récapitulatif de session', e.message);
+    }
+
     const nomsInclus = eligibles.filter(st => idsChoisis.includes(st.id) && !echecs.includes(st.id))
       .map(st => `${st.nom} ${st.prenom}`);
     const sujet = `Habilitation électrique — ${s.numero_session_galaxy || '—'}`;
-    const texte = `Bonjour,\n\nCi-joint l'avis d'habilitation et la preuve d'examen pour :\n`
+    const texte = `Bonjour,\n\nCi-joint l'avis d'habilitation, la preuve d'examen et la copie de QCM pour :\n`
       + nomsInclus.map(n => `  - ${n}`).join('\n')
       + `\n\nSession : ${s.intitule || ''} (n° Galaxy ${s.numero_session_galaxy || '—'})`
+      + `\n\nLe récapitulatif de session (titres validés/non validés et recommandations) est également joint.`
       + (echecs.length ? `\n\n${echecs.length} stagiaire(s) n'a/ont pas pu être inclus (erreur de génération).` : '')
       + '\n\n— Message généré automatiquement par Habelec.';
 
