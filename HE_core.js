@@ -75,6 +75,25 @@ function dateFr(iso) {
   return isNaN(d) ? '' : d.toLocaleDateString('fr-FR');
 }
 
+// 2026-09-18 (demande de Jeremy) : sécurité anti-erreur de saisie sur la
+// date de naissance des stagiaires — plusieurs avaient mis la date du jour
+// au lieu de leur date de naissance (sans doute la date par défaut ouverte
+// par le sélecteur). dateNaissanceMax() borne le sélecteur, et
+// dateNaissanceValide() est la même règle utilisée à la validation du
+// formulaire (côté stagiaire ET côté formateur) : 16 ans révolus minimum.
+function dateNaissanceMax() {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 16);
+  return d.toISOString().slice(0, 10);
+}
+
+function dateNaissanceValide(valeur) {
+  if (!valeur) return false;
+  const d = new Date(valeur);
+  if (isNaN(d)) return false;
+  return d.toISOString().slice(0, 10) <= dateNaissanceMax();
+}
+
 /** Affiche un bandeau d'erreur exploitable plutôt qu'un plantage muet. */
 function erreurSupabase(contexte, e) {
   const msg = e?.message || String(e);

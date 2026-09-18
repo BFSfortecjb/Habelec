@@ -1113,7 +1113,7 @@ async function envoyerSecretariat() {
 async function nouveauStagiaire() { await editerStagiaire(null); }
 
 async function editerStagiaire(id) {
-  let st = { nom: '', prenom: '', fonction: '', affectation: '', domaines: [], symboles: [] };
+  let st = { nom: '', prenom: '', fonction: '', affectation: '', date_naissance: null, domaines: [], symboles: [] };
   if (id) {
     const { data } = await sb.from('stagiaires')
       .select('*, stagiaire_symboles(symbole_code)').eq('id', id).single();
@@ -1138,6 +1138,13 @@ async function editerStagiaire(id) {
       <p class="aide">Utilisée sur l'avis et le titre d'habilitation (volet « L'EMPLOYEUR »). Peut
         aussi être saisie par le stagiaire lui-même à la connexion au QCM (dans ce cas elle écrase
         cette valeur) — et est purgée à la clôture de la session.</p>
+      <label>Date de naissance
+        <input name="date_naissance" type="date" max="${dateNaissanceMax()}"
+          value="${esc(st.date_naissance || '')}">
+      </label>
+      <p class="aide">Normalement saisie par le stagiaire lui-même à la connexion au QCM — ce champ
+        permet de la corriger si besoin (ex. date du jour saisie par erreur). Elle est purgée à la
+        clôture de la session.</p>
       <fieldset><legend>Domaines de tension</legend>
         ${['TBT', 'BT', 'HTA', 'HTB'].map(d => `<label class="case">
           <input type="checkbox" name="domaine" value="${d}"
@@ -1176,8 +1183,15 @@ async function editerStagiaire(id) {
       fonction: f.fonction.value.trim(),
       affectation: f.affectation.value.trim(),
       entreprise: f.entreprise.value.trim(),
+      date_naissance: f.date_naissance.value || null,
       domaines: $$('#form-stagiaire input[name=domaine]:checked').map(i => i.value),
     };
+    // 2026-09-18 (demande de Jeremy) : même sécurité que côté stagiaire —
+    // évite qu'une correction manuelle réintroduise une date du jour.
+    if (donnees.date_naissance && !dateNaissanceValide(donnees.date_naissance)) {
+      return toast('Cette date de naissance donne moins de 16 ans — vérifie qu\'il ne s\'agit pas de '
+        + 'la date du jour par erreur.', 'erreur', 7000);
+    }
     const symboles = $$('#form-stagiaire input[name=symbole]:checked').map(i => i.value);
     try {
       let stagiaireId = id;

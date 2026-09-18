@@ -137,7 +137,7 @@ function rendreFormulaireInfos(cible, jeton, candidat) {
         la carte d'habilitation, avant de commencer le questionnaire.</p>
       <form id="form-infos" class="carte">
         <label>Date de naissance
-          <input name="date_naissance" type="date" required
+          <input name="date_naissance" type="date" required max="${dateNaissanceMax()}"
                  value="${esc(candidat.date_naissance || '')}"></label>
         <label>Entreprise
           <input name="entreprise" type="text" required autocomplete="off"
@@ -148,6 +148,14 @@ function rendreFormulaireInfos(cible, jeton, candidat) {
   $('#form-infos').addEventListener('submit', async ev => {
     ev.preventDefault();
     const f = ev.target;
+    // 2026-09-18 (demande de Jeremy) : plusieurs stagiaires ont saisi la
+    // date du jour au lieu de leur date de naissance (probablement la date
+    // par défaut du sélecteur) — on bloque toute date donnant moins de 16
+    // ans, pour éviter que l'erreur reparte se glisser dans le dossier.
+    if (!dateNaissanceValide(f.date_naissance.value)) {
+      return toast('Cette date de naissance donne moins de 16 ans — vérifie qu\'il ne s\'agit pas de la '
+        + 'date du jour par erreur.', 'erreur', 7000);
+    }
     try {
       await rpc('completer_infos_stagiaire', {
         p_jeton: jeton,
