@@ -1,3 +1,9 @@
+<!--
+  © 2026 BFS Habelec — Jérémy Bizeul — Vigie-lance, pour BFS Prévention (Bretagne Formation Sécurité).
+  Tous droits réservés. Toute reproduction, distribution ou réutilisation de ce code,
+  en tout ou partie, sans autorisation écrite préalable est interdite.
+  Auteur : Jérémy Bizeul — Vigie-lance — https://www.bfs-prevention.fr
+-->
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -5,6 +11,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>BFS Habelec — Évaluation NF C18-510</title>
 <meta name="theme-color" content="#f3ab12">
+<meta name="author" content="Jérémy Bizeul — Vigie-lance (pour BFS Prévention)">
+<meta name="copyright" content="© 2026 Jérémy Bizeul — Vigie-lance / BFS Prévention. Tous droits réservés.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet"
@@ -16,6 +24,11 @@
 <div id="ecran"></div>
 <div id="toasts"></div>
 <div id="debug-panel" hidden></div>
+
+<footer class="site-copyright" style="max-width:640px;margin:0 auto;padding:16px 20px 24px;text-align:center;font-size:11px;color:#464645;opacity:.7;line-height:1.5;">
+  Outil mis à disposition par BFS Prévention (Bretagne Formation Sécurité) — © 2026 — Tous droits
+  réservés. Copie, reproduction ou réutilisation interdites sans autorisation.
+</footer>
 
 <!-- Bibliothèques externes (CDN) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
@@ -49,6 +62,9 @@ if ('serviceWorker' in navigator) {
       .catch(err => console.warn('Service worker non installé :', err));
   });
 }
+
+console.log('%c© 2026 Jérémy Bizeul — Vigie-lance, pour BFS Prévention.', 'color:#c9a227; font-weight:bold; font-size:12px;');
+console.log('BFS Habelec — outil original. Toute reproduction ou réutilisation de ce code sans autorisation écrite est interdite. Contact : https://www.bfs-prevention.fr');
 </script>
 
 </body>

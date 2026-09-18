@@ -528,6 +528,45 @@ function ouvrirActionsStagiaire(id, nom, prenom, evaluationExterne) {
  * ratées (plutôt que de les diluer parmi les bonnes réponses), regroupées
  * par thématique et triées par nombre d'erreurs décroissant, pour que le
  * formateur repère vite les axes de travail. */
+// 2026-09-17 (demande de Jeremy) : code couleur par titre sur les résultats
+// de positionnement, pour voir d'un coup d'œil lesquels seraient validés.
+// Approximatif par nature : le QCM de positionnement tire ses questions sur
+// l'UNION des thématiques des titres choisis ensemble (voir
+// habelec.plan_tirage_symboles), donc une question peut compter pour
+// plusieurs titres à la fois — il n'y a pas de séparation stricte comme à
+// l'examen réel. On reconstitue ici, pour un titre donné, le sous-ensemble
+// des questions tirées qui relèvent de ses propres thématiques (via
+// S.referentiel.gabaritsParSymbole + quotas), puis on applique la même
+// règle que la session (seuil global + fondamentales) à ce sous-ensemble.
+function evaluerTitrePositionnement(symboleCode, questions) {
+  const gabarits = S.referentiel?.gabaritsParSymbole?.[symboleCode] || [];
+  const themes = new Set((S.referentiel?.quotas || [])
+    .filter(q => gabarits.includes(q.gabarit_code) && q.nb > 0)
+    .map(q => q.theme_code));
+  const sousEnsemble = (questions || []).filter(q => themes.has(q.theme_code));
+  if (!sousEnsemble.length) return { statut: 'indetermine' };
+  const bonnes = sousEnsemble.filter(q => q.correcte).length;
+  const pct = bonnes / sousEnsemble.length;
+  const fondEchouee = sousEnsemble.some(q => q.fondamentale && !q.correcte);
+  const seuil = S.session?.seuil_global ?? 0.7;
+  const exigerFond = S.session?.exiger_fondamentales ?? true;
+  const valide = pct >= seuil && (!exigerFond || !fondEchouee);
+  return { statut: valide ? 'valide' : 'echec', bonnes, total: sousEnsemble.length, pct: Math.round(pct * 100) };
+}
+
+function chipsTitresPositionnement(symboles, questions) {
+  return (symboles || []).map(sy => {
+    const r = evaluerTitrePositionnement(sy, questions);
+    const classe = r.statut === 'valide' ? 'titre-vert-clair'
+      : r.statut === 'echec' ? 'titre-rouge-clair' : 'titre-gris-clair';
+    const info = r.statut === 'indetermine'
+      ? 'Pas assez de questions propres à ce titre pour se prononcer'
+      : `${r.bonnes} / ${r.total} sur les thématiques de ce titre (${r.pct} %)`
+        + (r.statut === 'valide' ? ' — serait validé' : ' — ne serait pas validé');
+    return `<span class="puce ${classe}" title="${esc(info)}">${esc(sy)}</span>`;
+  }).join(' ');
+}
+
 async function voirPositionnements(id, nom, prenom) {
   ouvrirModale(`Positionnement — ${nom} ${prenom}`, '<p class="aide">Chargement…</p>');
   const { data, error } = await sb.from('positionnements')
@@ -550,7 +589,7 @@ async function voirPositionnements(id, nom, prenom) {
     const pct = p.nb_questions ? Math.round((p.nb_bonnes / p.nb_questions) * 100) : 0;
     return `
       <details class="carte" ${i === 0 ? 'open' : ''}>
-        <summary><b>${new Date(p.cree_le).toLocaleString('fr-FR')}</b> — ${esc((p.symboles || []).join(', '))}
+        <summary><b>${new Date(p.cree_le).toLocaleString('fr-FR')}</b> — ${chipsTitresPositionnement(p.symboles, p.questions)}
           — <b>${p.nb_bonnes} / ${p.nb_questions}</b> (${pct} %)</summary>
         ${ratees.length ? `
           <p class="aide"><b>${ratees.length} question(s) à revoir</b>, classées par thématique
@@ -570,7 +609,13 @@ async function voirPositionnements(id, nom, prenom) {
       </details>`;
   }).join('');
 
-  $('#modale .corps-modale').replaceChildren(document.createRange().createContextualFragment(html));
+  $('#modale .corps-modale').replaceChildren(document.createRange().createContextualFragment(
+    '<p class="aide">Couleur des titres : <span class="puce titre-vert-clair">validé</span> '
+    + '<span class="puce titre-rouge-clair">non validé</span> '
+    + '<span class="puce titre-gris-clair">indéterminé</span> — estimation à partir des questions '
+    + "tirées propres à ce titre (le QCM de positionnement mélange les thématiques quand plusieurs "
+    + 'titres sont choisis ensemble, ce n\'est donc pas exactement la règle de l\'examen réel).</p>'
+    + html));
 }
 
 /* ---------- QCM de rattrapage (2026-09-04, demande de Jeremy) ----------
