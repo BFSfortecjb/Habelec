@@ -298,6 +298,7 @@ async function rendreDetailSession(zone) {
           s'entraîne avec les réponses affichées, sans impact sur son dossier.</p>
         <div><code>${esc(lienEntrainement)}</code></div>
         <button class="lien" onclick="navigator.clipboard.writeText('${esc(lienEntrainement)}');toast('Lien copié')">Copier le lien</button>
+        <button class="lien" onclick="voirPositionnementsSession()">📊 Voir tous les positionnements de la session</button>
       </details>
       <div><b>N° de session Galaxy</b><div>${esc(s.numero_session_galaxy) || '<i>non renseigné</i>'}</div>
         <button class="lien" onclick="modifierNumeroGalaxy()">Modifier</button></div>
@@ -616,6 +617,98 @@ async function voirPositionnements(id, nom, prenom) {
     + "tirées propres à ce titre (le QCM de positionnement mélange les thématiques quand plusieurs "
     + 'titres sont choisis ensemble, ce n\'est donc pas exactement la règle de l\'examen réel).</p>'
     + html));
+}
+
+/* ---------- Positionnements — vue de session (2026-09-21, demande de
+ * Jeremy) : consulter un stagiaire à la fois (voirPositionnements) devenait
+ * fastidieux avec beaucoup de stagiaires. Cette vue regroupe TOUS les
+ * entraînements de positionnement de la session sur un seul affichage,
+ * ouvert dans une modale (comme les autres consultations) pour ne jamais
+ * gêner le tableau de bord de la session — accessible depuis le bloc QCM de
+ * positionnement replié, pas depuis la barre d'actions principale.
+ * Le condensé regroupe les questions ratées par question_id : une même
+ * question ratée plusieurs fois (même stagiaire sur plusieurs tentatives,
+ * ou plusieurs stagiaires) ne compte qu'une fois, avec un décompte
+ * d'échecs et la liste des stagiaires concernés, triée des questions les
+ * plus ratées aux moins ratées. */
+async function voirPositionnementsSession() {
+  ouvrirModale('Positionnements — vue de session', '<p class="aide">Chargement…</p>');
+  const s = S.session;
+  const { data: stagiaires } = await sb.from('stagiaires')
+    .select('id, nom, prenom').eq('session_id', s.id).order('nom');
+  const ids = (stagiaires || []).map(st => st.id);
+  if (!ids.length) {
+    return $('#modale .corps-modale').replaceChildren(document.createRange().createContextualFragment(
+      '<p class="aide">Aucun stagiaire dans cette session.</p>'));
+  }
+  const nomParId = Object.fromEntries((stagiaires || []).map(st => [st.id, `${st.nom} ${st.prenom}`]));
+
+  const { data, error } = await sb.from('positionnements')
+    .select('id, stagiaire_id, symboles, nb_questions, nb_bonnes, questions, cree_le')
+    .in('stagiaire_id', ids).order('cree_le', { ascending: false });
+  if (error) return $('#modale .corps-modale').replaceChildren(
+    document.createRange().createContextualFragment(`<p class="erreur">${esc(error.message)}</p>`));
+  if (!data || !data.length) {
+    return $('#modale .corps-modale').replaceChildren(document.createRange().createContextualFragment(
+      "<p class=\"aide\">Aucun entraînement de positionnement enregistré pour cette session — il faut "
+      + "s'être entraîné DANS cette session (code de session renseigné, puis son nom choisi) pour que le "
+      + 'résultat soit conservé.</p>'));
+  }
+
+  const erreursParQuestion = {};
+  data.forEach(p => {
+    (p.questions || []).filter(q => !q.correcte).forEach(q => {
+      const cle = q.question_id || q.enonce;
+      const e = (erreursParQuestion[cle] ||= {
+        enonce: q.enonce, theme_code: q.theme_code, fondamentale: q.fondamentale,
+        explication: q.explication, bonne_reponse: q.bonne_reponse, nb: 0, stagiaires: new Set(),
+      });
+      e.nb += 1;
+      e.stagiaires.add(nomParId[p.stagiaire_id] || '?');
+    });
+  });
+  const questionsTriees = Object.values(erreursParQuestion).sort((a, b) => b.nb - a.nb);
+
+  const htmlCondense = questionsTriees.length ? `
+    <details class="carte" open>
+      <summary><b>Questions les plus ratées</b> — ${questionsTriees.length} question(s) concernée(s),
+        tous stagiaires et toutes tentatives confondus</summary>
+      ${questionsTriees.map(e => `
+        <div class="question-ratee">
+          <p>${esc(e.enonce)}${e.fondamentale ? ' <span class="puce fond">Question fondamentale</span>' : ''}
+            <span class="puce" title="Thématique">${esc(e.theme_code)}</span>
+            <span class="puce alerte">${e.nb} échec(s)</span></p>
+          <p class="ok">Bonne réponse : ${esc((e.bonne_reponse || []).join(', '))}</p>
+          ${e.explication ? `<p class="explication">${esc(e.explication)}</p>` : ''}
+          <p class="aide">Stagiaire(s) concerné(s) : ${esc([...e.stagiaires].join(', '))}</p>
+        </div>`).join('')}
+    </details>` : '<p class="ok">✔ Aucune question ratée sur l\'ensemble des entraînements de la session.</p>';
+
+  // Détail par stagiaire, replié par défaut — le même code couleur par
+  // titre que la consultation individuelle (chipsTitresPositionnement),
+  // pour retrouver au même endroit ce qui se consultait avant tentative
+  // par tentative, sans avoir à rouvrir une modale par stagiaire.
+  const parStagiaire = {};
+  data.forEach(p => { (parStagiaire[p.stagiaire_id] ||= []).push(p); });
+  const htmlParStagiaire = (stagiaires || [])
+    .filter(st => parStagiaire[st.id])
+    .map(st => {
+      const tentatives = parStagiaire[st.id];
+      return `
+        <details class="carte">
+          <summary><b>${esc(st.nom)} ${esc(st.prenom)}</b> — ${tentatives.length} tentative(s)</summary>
+          ${tentatives.map(p => {
+            const pct = p.nb_questions ? Math.round((p.nb_bonnes / p.nb_questions) * 100) : 0;
+            return `<p>${new Date(p.cree_le).toLocaleString('fr-FR')} — ${chipsTitresPositionnement(p.symboles, p.questions)}
+              — <b>${p.nb_bonnes} / ${p.nb_questions}</b> (${pct} %)</p>`;
+          }).join('')}
+        </details>`;
+    }).join('');
+
+  $('#modale .corps-modale').replaceChildren(document.createRange().createContextualFragment(
+    '<p class="aide">Condensé de toutes les questions ratées de la session (tous stagiaires et toutes '
+    + 'tentatives confondus), puis détail par stagiaire ci-dessous (replié).</p>'
+    + htmlCondense + htmlParStagiaire));
 }
 
 /* ---------- QCM de rattrapage (2026-09-04, demande de Jeremy) ----------
