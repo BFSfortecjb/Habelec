@@ -2208,7 +2208,24 @@ async function editerQuestion(id) {
       if (id) {
         const { error } = await sb.from('questions').update(donnees).eq('id', id);
         if (error) throw error;
-        await sb.from('question_reponses').delete().eq('question_id', id);
+        // 2026-09-21 (bug remonté par Jeremy, Q289.ELEC.AP) : la policy RLS de
+        // suppression exigeait auparavant un compte admin — pour un formateur
+        // simple, ce delete était silencieusement ignoré (aucune erreur), et
+        // les nouvelles réponses s'ajoutaient par-dessus les anciennes à
+        // chaque enregistrement, au lieu de les remplacer -> doublons. La
+        // policy a été corrigée côté base, mais on vérifie ici en plus,
+        // explicitement, que la suppression a bien eu lieu avant de
+        // réinsérer — pour ne plus jamais dupliquer en silence si ce droit
+        // venait à changer à nouveau.
+        const { error: erreurSuppr, count } = await sb.from('question_reponses')
+          .delete({ count: 'exact' }).eq('question_id', id);
+        if (erreurSuppr) throw erreurSuppr;
+        if (!count) {
+          const { count: restantes } = await sb.from('question_reponses')
+            .select('id', { count: 'exact', head: true }).eq('question_id', id);
+          if (restantes) throw new Error("Impossible de remplacer les anciennes réponses (droit refusé) — "
+            + 'contacte un administrateur.');
+        }
       } else {
         const { data, error } = await sb.from('questions').insert(donnees).select().single();
         if (error) throw error;
