@@ -626,11 +626,61 @@ async function voirPositionnements(id, nom, prenom) {
  * ouvert dans une modale (comme les autres consultations) pour ne jamais
  * gêner le tableau de bord de la session — accessible depuis le bloc QCM de
  * positionnement replié, pas depuis la barre d'actions principale.
- * Le condensé regroupe les questions ratées par question_id : une même
- * question ratée plusieurs fois (même stagiaire sur plusieurs tentatives,
- * ou plusieurs stagiaires) ne compte qu'une fois, avec un décompte
- * d'échecs et la liste des stagiaires concernés, triée des questions les
- * plus ratées aux moins ratées. */
+ *
+ * 2026-09-21 (précision de Jeremy) : une question ratée sur une tentative,
+ * puis réussie sur une tentative suivante du même stagiaire, ne doit pas
+ * continuer à ressortir dans le condensé comme si elle posait encore
+ * problème — seule la DERNIÈRE tentative de chaque stagiaire compte par
+ * défaut pour ce condensé. Les tentatives précédentes restent toutes
+ * consultables (jamais supprimées de l'affichage) dans le détail par
+ * stagiaire plus bas, et un filtre permet de repasser le condensé sur
+ * "toutes les tentatives" pour une analyse plus large si besoin. */
+const POSITIONNEMENT_SESSION = { data: [], nomParId: {} };
+
+function condenserErreursPositionnement(donnees, nomParId) {
+  const erreursParQuestion = {};
+  donnees.forEach(p => {
+    (p.questions || []).filter(q => !q.correcte).forEach(q => {
+      const cle = q.question_id || q.enonce;
+      const e = (erreursParQuestion[cle] ||= {
+        enonce: q.enonce, theme_code: q.theme_code, fondamentale: q.fondamentale,
+        explication: q.explication, bonne_reponse: q.bonne_reponse, nb: 0, stagiaires: new Set(),
+      });
+      e.nb += 1;
+      e.stagiaires.add(nomParId[p.stagiaire_id] || '?');
+    });
+  });
+  return Object.values(erreursParQuestion).sort((a, b) => b.nb - a.nb);
+}
+
+function rendreCondensePositionnementSession(filtre) {
+  const conteneur = $('#condense-positionnement-session');
+  if (!conteneur) return;
+  const { data, nomParId } = POSITIONNEMENT_SESSION;
+  // "Dernière tentative" = la plus récente tentative de CHAQUE stagiaire
+  // (data est déjà triée du plus récent au plus ancien) — ainsi une erreur
+  // corrigée depuis ne ressort plus, sans jamais toucher à l'historique.
+  const donnees = filtre === 'toutes' ? data
+    : Object.values(data.reduce((acc, p) => {
+        if (!acc[p.stagiaire_id]) acc[p.stagiaire_id] = p; // premier = plus récent
+        return acc;
+      }, {}));
+  const questionsTriees = condenserErreursPositionnement(donnees, nomParId);
+
+  const html = questionsTriees.length ? `
+    ${questionsTriees.map(e => `
+      <div class="question-ratee">
+        <p>${esc(e.enonce)}${e.fondamentale ? ' <span class="puce fond">Question fondamentale</span>' : ''}
+          <span class="puce" title="Thématique">${esc(e.theme_code)}</span>
+          <span class="puce alerte">${e.nb} échec(s)</span></p>
+        <p class="ok">Bonne réponse : ${esc((e.bonne_reponse || []).join(', '))}</p>
+        ${e.explication ? `<p class="explication">${esc(e.explication)}</p>` : ''}
+        <p class="aide">Stagiaire(s) concerné(s) : ${esc([...e.stagiaires].join(', '))}</p>
+      </div>`).join('')}
+  ` : '<p class="ok">✔ Aucune question ratée sur le périmètre sélectionné.</p>';
+  conteneur.innerHTML = `<p class="aide">${questionsTriees.length} question(s) concernée(s).</p>${html}`;
+}
+
 async function voirPositionnementsSession() {
   ouvrirModale('Positionnements — vue de session', '<p class="aide">Chargement…</p>');
   const s = S.session;
@@ -654,61 +704,50 @@ async function voirPositionnementsSession() {
       + "s'être entraîné DANS cette session (code de session renseigné, puis son nom choisi) pour que le "
       + 'résultat soit conservé.</p>'));
   }
+  POSITIONNEMENT_SESSION.data = data;
+  POSITIONNEMENT_SESSION.nomParId = nomParId;
 
-  const erreursParQuestion = {};
-  data.forEach(p => {
-    (p.questions || []).filter(q => !q.correcte).forEach(q => {
-      const cle = q.question_id || q.enonce;
-      const e = (erreursParQuestion[cle] ||= {
-        enonce: q.enonce, theme_code: q.theme_code, fondamentale: q.fondamentale,
-        explication: q.explication, bonne_reponse: q.bonne_reponse, nb: 0, stagiaires: new Set(),
-      });
-      e.nb += 1;
-      e.stagiaires.add(nomParId[p.stagiaire_id] || '?');
-    });
-  });
-  const questionsTriees = Object.values(erreursParQuestion).sort((a, b) => b.nb - a.nb);
-
-  const htmlCondense = questionsTriees.length ? `
-    <details class="carte" open>
-      <summary><b>Questions les plus ratées</b> — ${questionsTriees.length} question(s) concernée(s),
-        tous stagiaires et toutes tentatives confondus</summary>
-      ${questionsTriees.map(e => `
-        <div class="question-ratee">
-          <p>${esc(e.enonce)}${e.fondamentale ? ' <span class="puce fond">Question fondamentale</span>' : ''}
-            <span class="puce" title="Thématique">${esc(e.theme_code)}</span>
-            <span class="puce alerte">${e.nb} échec(s)</span></p>
-          <p class="ok">Bonne réponse : ${esc((e.bonne_reponse || []).join(', '))}</p>
-          ${e.explication ? `<p class="explication">${esc(e.explication)}</p>` : ''}
-          <p class="aide">Stagiaire(s) concerné(s) : ${esc([...e.stagiaires].join(', '))}</p>
-        </div>`).join('')}
-    </details>` : '<p class="ok">✔ Aucune question ratée sur l\'ensemble des entraînements de la session.</p>';
-
-  // Détail par stagiaire, replié par défaut — le même code couleur par
-  // titre que la consultation individuelle (chipsTitresPositionnement),
-  // pour retrouver au même endroit ce qui se consultait avant tentative
-  // par tentative, sans avoir à rouvrir une modale par stagiaire.
+  // Détail par stagiaire, replié par défaut — TOUTES les tentatives, y
+  // compris les anciennes, restent visibles ici quel que soit le filtre du
+  // condensé ci-dessus (on peut toujours revenir dessus) ; la plus récente
+  // est repérée explicitement, puisque c'est elle qui compte par défaut
+  // dans le condensé.
   const parStagiaire = {};
   data.forEach(p => { (parStagiaire[p.stagiaire_id] ||= []).push(p); });
   const htmlParStagiaire = (stagiaires || [])
     .filter(st => parStagiaire[st.id])
     .map(st => {
-      const tentatives = parStagiaire[st.id];
+      const tentatives = parStagiaire[st.id]; // déjà triées, plus récente en premier
       return `
         <details class="carte">
           <summary><b>${esc(st.nom)} ${esc(st.prenom)}</b> — ${tentatives.length} tentative(s)</summary>
-          ${tentatives.map(p => {
+          ${tentatives.map((p, i) => {
             const pct = p.nb_questions ? Math.round((p.nb_bonnes / p.nb_questions) * 100) : 0;
-            return `<p>${new Date(p.cree_le).toLocaleString('fr-FR')} — ${chipsTitresPositionnement(p.symboles, p.questions)}
+            return `<p>${i === 0 ? '<span class="puce" title="Compte dans le condensé par défaut">actuelle</span> ' : ''}
+              ${new Date(p.cree_le).toLocaleString('fr-FR')} — ${chipsTitresPositionnement(p.symboles, p.questions)}
               — <b>${p.nb_bonnes} / ${p.nb_questions}</b> (${pct} %)</p>`;
           }).join('')}
         </details>`;
     }).join('');
 
-  $('#modale .corps-modale').replaceChildren(document.createRange().createContextualFragment(
-    '<p class="aide">Condensé de toutes les questions ratées de la session (tous stagiaires et toutes '
-    + 'tentatives confondus), puis détail par stagiaire ci-dessous (replié).</p>'
-    + htmlCondense + htmlParStagiaire));
+  $('#modale .corps-modale').replaceChildren(document.createRange().createContextualFragment(`
+    <fieldset class="filtre-positionnement-session">
+      <legend>Erreurs prises en compte dans le condensé ci-dessous</legend>
+      <label class="case"><input type="radio" name="filtre-positionnement" value="derniere" checked>
+        Dernière tentative de chaque stagiaire (recommandé — une erreur déjà corrigée depuis ne ressort plus)</label>
+      <label class="case"><input type="radio" name="filtre-positionnement" value="toutes">
+        Toutes les tentatives (analyse plus large, y compris les erreurs déjà corrigées depuis)</label>
+    </fieldset>
+    <details class="carte" open>
+      <summary><b>Questions les plus ratées</b></summary>
+      <div id="condense-positionnement-session"></div>
+    </details>
+    <p class="aide">Détail par stagiaire (replié), avec l'historique complet de ses tentatives :</p>
+    ${htmlParStagiaire}`));
+
+  rendreCondensePositionnementSession('derniere');
+  $$('input[name=filtre-positionnement]').forEach(r =>
+    r.addEventListener('change', () => rendreCondensePositionnementSession(r.value)));
 }
 
 /* ---------- QCM de rattrapage (2026-09-04, demande de Jeremy) ----------
