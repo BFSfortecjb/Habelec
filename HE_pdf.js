@@ -384,13 +384,98 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
   // Détail par titre visé : justifie la réussite ou l'échec de l'évaluation
   // théorique (% et fondamentales) et résume la pratique, titre par titre —
   // le tableau ci-dessus n'affiche qu'un score global agrégé.
-  // 2026-09-22 (demande de Jeremy) : quand la règle "questions fondamentales"
-  // est désactivée pour la session (S.session.exiger_fondamentales = false),
-  // la colonne n'a plus aucun sens à afficher (elle ne montrerait jamais que
-  // "aucune exigée") — on la retire entièrement du document au lieu de
-  // l'afficher vide/inutile.
-  const avecFondamentales = session?.exiger_fondamentales !== false;
   if (gabaritsVises.length) {
+    // 2026-09-22 (demande de Jeremy) : la colonne "Questions fondamentales"
+    // ne doit apparaître que si au moins UN des titres du tableau en exige
+    // vraiment (refFond > 0). Le réglage exiger_fondamentales de la session
+    // ne suffit pas à le décider tout seul — vu sur le dossier AUROKEUM
+    // Anthony : la session l'a bien activé, mais le tirage de BE Manœuvre et
+    // BS n'a affecté aucune question fondamentale à ces titres précis
+    // (refFond = 0 pour les deux), donc la colonne n'affichait jamais que
+    // "aucune exigée" pour lui. On calcule donc d'abord toutes les lignes,
+    // puis on décide d'inclure ou non la colonne selon leur contenu réel.
+    const lignesDetail = gabaritsVises.filter(g => symbolesStagiaire
+      .some(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g))
+    ).map(g => {
+      const symbolesVises = symbolesStagiaire
+        .filter(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g));
+      const d = detailParGabarit[g];
+      // 2026-09-08 (demande de Jeremy) : pour une évaluation externe, il
+      // n'y a ni theorie_gabarit_detail() (d) ni ligne epreuves_pratiques
+      // (pratiqueParGabarit) — pratOk vient alors de resultats_symbole,
+      // seule source à jour pour ce stagiaire (voir aussi calculer_resultats,
+      // corrigé en base le même jour pour ne plus l'écraser).
+      const pratOk = ev
+        ? symbolesVises.map(sym => pratiqueOkParSymbole[sym]).find(v => v !== undefined)
+        : pratiqueParGabarit[g];
+      const theorieOkExterne = ev
+        ? symbolesVises.map(sym => theorieOkParSymbole[sym]).find(v => v !== undefined)
+        : undefined;
+      const refFond = d?.fond_total || 0;
+      // Score chiffré (ex: 2/2) plutôt qu'un texte "toutes justes / insuffisant"
+      // (demande de Jeremy, 2026-08-27) — requis et score viennent tous les
+      // deux de theorie_gabarit_detail() (voir remarque plus haut).
+      const cellule = (texte, couleur) => couleur
+        ? { content: texte, styles: { textColor: couleur, fontStyle: 'bold' } }
+        : texte;
+
+      const fond = ev ? 'évaluation externe'
+        : !d ? '—'
+        : refFond === 0 ? '—'
+        : cellule(`${d.fond_justes}/${refFond}`, d.fond_ok ? BFS.vert : BFS.rouge);
+
+      // 2026-09-08 (demande de Jeremy) : théorie affichée comme "validée" /
+      // "non validée" (pas de score chiffré par titre, une évaluation
+      // externe ne donne qu'un résultat global) plutôt que "—", qui laissait
+      // croire que la théorie n'avait jamais été évaluée.
+      const theorie = ev
+        ? (theorieOkExterne === true ? cellule('validée (externe)', BFS.vert)
+          : theorieOkExterne === false ? cellule('non validée (externe)', BFS.rouge)
+          : '—')
+        : d
+        ? cellule(`${d.justes}/${d.total} (${d.taux} %)`, d.ok ? BFS.vert : BFS.rouge)
+        : '—';
+
+      const pratique = pratOk === true ? cellule('validée', BFS.vert)
+        : pratOk === false ? cellule('non validée', BFS.rouge)
+        : 'en attente';
+
+      const libelleTitre = symbolesVises.length
+        ? symbolesVises.map(libelleSymbole).join(' / ')
+        : libelleGabarit(g); // repli si l'info symbole n'est pas disponible
+      // 2026-09-08 (demande de Jeremy) : "(rattrapage)" ajouté uniquement à
+      // l'affichage — libelleTitre reste inchangé pour les recherches de
+      // préconisation par symbole plus bas.
+      const libelleTitreAffiche = libelleTitre + (viaRattrapage[g] ? ' (rattrapage)' : '');
+
+      // Couleur de la ligne entière (2026-08-27, demande de Jeremy) : vert si
+      // titre entièrement validé (théorie + fondamentales + pratique), rouge
+      // dès qu'un critère est raté, neutre tant que la pratique est en attente.
+      const theorieEchoue = ev ? theorieOkExterne === false : (d && !d.ok);
+      const theorieValide = ev ? theorieOkExterne === true : (d && d.ok);
+      const echoue = theorieEchoue || pratOk === false;
+      const valide = theorieValide && pratOk === true;
+      const intitule = echoue ? cellule(libelleTitreAffiche, BFS.rouge)
+        : valide ? cellule(libelleTitreAffiche, BFS.vert)
+        : libelleTitreAffiche;
+
+      // Préconisation du formateur (2026-08-28, demande de Jeremy) : saisie
+      // à la main (voir "✏️" sur l'écran Session), affichée uniquement sur
+      // les titres en échec — un titre non encore en échec (pratique en
+      // attente) n'a par définition rien à préconiser pour l'instant.
+      // 2026-09-08 (demande de Jeremy) : fusionnée avec la recommandation
+      // saisie côté pratique (epreuves_pratiques.recommandation), qui était
+      // jusque-là silencieusement ignorée sur ce document.
+      const preconisationTheorie = symbolesVises.map(sym => preconisationParSymbole[sym]).filter(Boolean);
+      const preconisationPratique = recommandationParGabarit[g];
+      const preconisation = echoue
+        ? ([...preconisationTheorie, ...(preconisationPratique ? [preconisationPratique] : [])].join(' ; ') || '—')
+        : '';
+
+      return { intitule, theorie, fond, refFond, pratique, preconisation };
+    });
+    const avecFondamentales = lignesDetail.some(l => l.refFond > 0);
+
     doc.autoTable({
       startY: y, margin: { left: marge, right: marge }, theme: 'grid',
       styles: { fontSize: 7.5, cellPadding: 1.6, valign: 'middle' },
@@ -425,91 +510,9 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
         { content: 'Épreuve pratique', styles: { halign: 'center' } },
         { content: 'Préconisation', styles: { halign: 'left' } },
       ]],
-      // 2026-09-03 (demande de Jeremy) : un titre décoché après coup (ex.
-      // via "Modifier le stagiaire") ne doit plus apparaître sur l'avis non
-      // plus — on ignore les gabarits qui ne correspondent plus à aucun
-      // titre actuellement coché (même filtre que sur la preuve d'examen).
-      body: gabaritsVises.filter(g => symbolesStagiaire
-        .some(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g))
-      ).map(g => {
-        const symbolesVises = symbolesStagiaire
-          .filter(sym => (S.referentiel.gabaritsParSymbole[sym] || []).includes(g));
-        const d = detailParGabarit[g];
-        // 2026-09-08 (demande de Jeremy) : pour une évaluation externe, il
-        // n'y a ni theorie_gabarit_detail() (d) ni ligne epreuves_pratiques
-        // (pratiqueParGabarit) — pratOk vient alors de resultats_symbole,
-        // seule source à jour pour ce stagiaire (voir aussi calculer_resultats,
-        // corrigé en base le même jour pour ne plus l'écraser).
-        const pratOk = ev
-          ? symbolesVises.map(sym => pratiqueOkParSymbole[sym]).find(v => v !== undefined)
-          : pratiqueParGabarit[g];
-        const theorieOkExterne = ev
-          ? symbolesVises.map(sym => theorieOkParSymbole[sym]).find(v => v !== undefined)
-          : undefined;
-        const refFond = d?.fond_total || 0;
-        // Score chiffré (ex: 2/2) plutôt qu'un texte "toutes justes / insuffisant"
-        // (demande de Jeremy, 2026-08-27) — requis et score viennent tous les
-        // deux de theorie_gabarit_detail() (voir remarque plus haut).
-        const cellule = (texte, couleur) => couleur
-          ? { content: texte, styles: { textColor: couleur, fontStyle: 'bold' } }
-          : texte;
-
-        const fond = ev ? 'évaluation externe'
-          : !d ? '—'
-          : refFond === 0 ? 'aucune exigée'
-          : cellule(`${d.fond_justes}/${refFond}`, d.fond_ok ? BFS.vert : BFS.rouge);
-
-        // 2026-09-08 (demande de Jeremy) : théorie affichée comme "validée" /
-        // "non validée" (pas de score chiffré par titre, une évaluation
-        // externe ne donne qu'un résultat global) plutôt que "—", qui laissait
-        // croire que la théorie n'avait jamais été évaluée.
-        const theorie = ev
-          ? (theorieOkExterne === true ? cellule('validée (externe)', BFS.vert)
-            : theorieOkExterne === false ? cellule('non validée (externe)', BFS.rouge)
-            : '—')
-          : d
-          ? cellule(`${d.justes}/${d.total} (${d.taux} %)`, d.ok ? BFS.vert : BFS.rouge)
-          : '—';
-
-        const pratique = pratOk === true ? cellule('validée', BFS.vert)
-          : pratOk === false ? cellule('non validée', BFS.rouge)
-          : 'en attente';
-
-        const libelleTitre = symbolesVises.length
-          ? symbolesVises.map(libelleSymbole).join(' / ')
-          : libelleGabarit(g); // repli si l'info symbole n'est pas disponible
-        // 2026-09-08 (demande de Jeremy) : "(rattrapage)" ajouté uniquement à
-        // l'affichage — libelleTitre reste inchangé pour les recherches de
-        // préconisation par symbole plus bas.
-        const libelleTitreAffiche = libelleTitre + (viaRattrapage[g] ? ' (rattrapage)' : '');
-
-        // Couleur de la ligne entière (2026-08-27, demande de Jeremy) : vert si
-        // titre entièrement validé (théorie + fondamentales + pratique), rouge
-        // dès qu'un critère est raté, neutre tant que la pratique est en attente.
-        const theorieEchoue = ev ? theorieOkExterne === false : (d && !d.ok);
-        const theorieValide = ev ? theorieOkExterne === true : (d && d.ok);
-        const echoue = theorieEchoue || pratOk === false;
-        const valide = theorieValide && pratOk === true;
-        const intitule = echoue ? cellule(libelleTitreAffiche, BFS.rouge)
-          : valide ? cellule(libelleTitreAffiche, BFS.vert)
-          : libelleTitreAffiche;
-
-        // Préconisation du formateur (2026-08-28, demande de Jeremy) : saisie
-        // à la main (voir "✏️" sur l'écran Session), affichée uniquement sur
-        // les titres en échec — un titre non encore en échec (pratique en
-        // attente) n'a par définition rien à préconiser pour l'instant.
-        // 2026-09-08 (demande de Jeremy) : fusionnée avec la recommandation
-        // saisie côté pratique (epreuves_pratiques.recommandation), qui était
-        // jusque-là silencieusement ignorée sur ce document.
-        const preconisationTheorie = symbolesVises.map(sym => preconisationParSymbole[sym]).filter(Boolean);
-        const preconisationPratique = recommandationParGabarit[g];
-        const preconisation = echoue
-          ? ([...preconisationTheorie, ...(preconisationPratique ? [preconisationPratique] : [])].join(' ; ') || '—')
-          : '';
-
-        return avecFondamentales ? [intitule, theorie, fond, pratique, preconisation]
-          : [intitule, theorie, pratique, preconisation];
-      }),
+      body: lignesDetail.map(l => avecFondamentales
+        ? [l.intitule, l.theorie, l.fond, l.pratique, l.preconisation]
+        : [l.intitule, l.theorie, l.pratique, l.preconisation]),
     });
     y = doc.lastAutoTable.finalY + 4;
   }
@@ -1008,10 +1011,10 @@ async function construireDocPreuveExamen(stagiaireId) {
 
       return {
         libelle: libelleTitre,
-        theorie: d ? { texte: `${d.justes}/${d.total} (${d.taux} %)`, ok: d.ok,
-          fond: refFond === 0 ? 'aucune exigée' : `${d.fond_justes}/${refFond}`, fondOk: d.fond_ok } : null,
-        theorieRattrapage: dr ? { texte: `${dr.justes}/${dr.total} (${dr.taux} %)`, ok: dr.ok,
-          fond: refFondR === 0 ? 'aucune exigée' : `${dr.fond_justes}/${refFondR}`, fondOk: dr.fond_ok } : null,
+        theorie: d ? { texte: `${d.justes}/${d.total} (${d.taux} %)`, ok: d.ok, refFond,
+          fond: refFond === 0 ? '—' : `${d.fond_justes}/${refFond}`, fondOk: d.fond_ok } : null,
+        theorieRattrapage: dr ? { texte: `${dr.justes}/${dr.total} (${dr.taux} %)`, ok: dr.ok, refFond: refFondR,
+          fond: refFondR === 0 ? '—' : `${dr.fond_justes}/${refFondR}`, fondOk: dr.fond_ok } : null,
         pratique: items,
         pratiqueVerdict: p?.reussie,
         preconisation: [
@@ -1055,10 +1058,13 @@ async function construireDocPreuveExamen(stagiaireId) {
   y = doc.lastAutoTable.finalY + 4;
 
   // 2026-09-22 (demande de Jeremy) : même règle que sur l'avis/titre — la
-  // colonne "Questions fondamentales" ne s'affiche que si la session exige
-  // effectivement des fondamentales (sinon elle ne montrerait jamais que
-  // "aucune exigée").
-  const avecFondamentales = session?.exiger_fondamentales !== false;
+  // colonne "Questions fondamentales" ne s'affiche que si au moins un des
+  // titres affichés en exige vraiment (refFond > 0 sur son passage initial
+  // OU son rattrapage) — le réglage exiger_fondamentales de la session ne
+  // suffit pas : un titre précis peut très bien n'avoir tiré aucune
+  // question fondamentale alors que la session les exige en général.
+  const avecFondamentales = titresData.some(t =>
+    (t.theorie?.refFond > 0) || (t.theorieRattrapage?.refFond > 0));
   doc.autoTable({
     startY: y, margin: { left: marge, right: marge }, theme: 'grid',
     styles: { fontSize: 8, cellPadding: 1.8, valign: 'middle' },
