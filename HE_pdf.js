@@ -384,6 +384,12 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
   // Détail par titre visé : justifie la réussite ou l'échec de l'évaluation
   // théorique (% et fondamentales) et résume la pratique, titre par titre —
   // le tableau ci-dessus n'affiche qu'un score global agrégé.
+  // 2026-09-22 (demande de Jeremy) : quand la règle "questions fondamentales"
+  // est désactivée pour la session (S.session.exiger_fondamentales = false),
+  // la colonne n'a plus aucun sens à afficher (elle ne montrerait jamais que
+  // "aucune exigée") — on la retire entièrement du document au lieu de
+  // l'afficher vide/inutile.
+  const avecFondamentales = session?.exiger_fondamentales !== false;
   if (gabaritsVises.length) {
     doc.autoTable({
       startY: y, margin: { left: marge, right: marge }, theme: 'grid',
@@ -395,17 +401,27 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
       // explicitement (via head ci-dessous) pour rester cohérent avec celui
       // des valeurs de sa colonne, plutôt que de compter sur un héritage
       // implicite de columnStyles qui ne s'appliquait pas toujours à l'en-tête.
-      columnStyles: {
+      columnStyles: avecFondamentales ? {
         0: { cellWidth: largeurUtile * 0.20 },
         1: { cellWidth: largeurUtile * 0.16, halign: 'center' },
         2: { cellWidth: largeurUtile * 0.16, halign: 'center' },
         3: { cellWidth: largeurUtile * 0.15, halign: 'center' },
         4: { cellWidth: largeurUtile * 0.33 },
+      } : {
+        0: { cellWidth: largeurUtile * 0.22 },
+        1: { cellWidth: largeurUtile * 0.19, halign: 'center' },
+        2: { cellWidth: largeurUtile * 0.19, halign: 'center' },
+        3: { cellWidth: largeurUtile * 0.40 },
       },
-      head: [[
+      head: [avecFondamentales ? [
         { content: 'Titre visé', styles: { halign: 'left' } },
         { content: 'Résultat théorique', styles: { halign: 'center' } },
         { content: 'Questions fondamentales', styles: { halign: 'center' } },
+        { content: 'Épreuve pratique', styles: { halign: 'center' } },
+        { content: 'Préconisation', styles: { halign: 'left' } },
+      ] : [
+        { content: 'Titre visé', styles: { halign: 'left' } },
+        { content: 'Résultat théorique', styles: { halign: 'center' } },
         { content: 'Épreuve pratique', styles: { halign: 'center' } },
         { content: 'Préconisation', styles: { halign: 'left' } },
       ]],
@@ -491,7 +507,8 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
           ? ([...preconisationTheorie, ...(preconisationPratique ? [preconisationPratique] : [])].join(' ; ') || '—')
           : '';
 
-        return [intitule, theorie, fond, pratique, preconisation];
+        return avecFondamentales ? [intitule, theorie, fond, pratique, preconisation]
+          : [intitule, theorie, pratique, preconisation];
       }),
     });
     y = doc.lastAutoTable.finalY + 4;
@@ -1037,19 +1054,30 @@ async function construireDocPreuveExamen(stagiaireId) {
   });
   y = doc.lastAutoTable.finalY + 4;
 
+  // 2026-09-22 (demande de Jeremy) : même règle que sur l'avis/titre — la
+  // colonne "Questions fondamentales" ne s'affiche que si la session exige
+  // effectivement des fondamentales (sinon elle ne montrerait jamais que
+  // "aucune exigée").
+  const avecFondamentales = session?.exiger_fondamentales !== false;
   doc.autoTable({
     startY: y, margin: { left: marge, right: marge }, theme: 'grid',
     styles: { fontSize: 8, cellPadding: 1.8, valign: 'middle' },
     headStyles: { fillColor: BFS.jaune, textColor: BFS.noir, fontStyle: 'bold' },
-    columnStyles: {
+    columnStyles: avecFondamentales ? {
       0: { cellWidth: largeurUtile * 0.34 },
       1: { cellWidth: largeurUtile * 0.33, halign: 'center' },
       2: { cellWidth: largeurUtile * 0.33, halign: 'center' },
+    } : {
+      0: { cellWidth: largeurUtile * 0.44 },
+      1: { cellWidth: largeurUtile * 0.56, halign: 'center' },
     },
-    head: [[
+    head: [avecFondamentales ? [
       { content: 'TEST THÉORIQUE', styles: { halign: 'left' } },
       { content: 'Résultat', styles: { halign: 'center' } },
       { content: 'Questions fondamentales', styles: { halign: 'center' } },
+    ] : [
+      { content: 'TEST THÉORIQUE', styles: { halign: 'left' } },
+      { content: 'Résultat', styles: { halign: 'center' } },
     ]],
     // 2026-09-08 (demande de Jeremy) : quand un rattrapage a eu lieu pour ce
     // titre, les DEUX passages sont affichés (initial puis rattrapage),
@@ -1061,20 +1089,20 @@ async function construireDocPreuveExamen(stagiaireId) {
       if (t.theorieRattrapage) {
         const texteTheorie = `Passage initial : ${t.theorie ? t.theorie.texte : '—'}\n`
           + `Rattrapage : ${t.theorieRattrapage.texte}`;
-        const texteFond = `Passage initial : ${t.theorie?.fond ?? '—'}\n`
-          + `Rattrapage : ${t.theorieRattrapage.fond}`;
-        return [
-          t.libelle,
-          cellule(texteTheorie, t.theorieRattrapage.ok ? BFS.vert : BFS.rouge),
-          cellule(texteFond, t.theorieRattrapage.fondOk ? BFS.vert : BFS.rouge),
-        ];
+        const ligne = [t.libelle, cellule(texteTheorie, t.theorieRattrapage.ok ? BFS.vert : BFS.rouge)];
+        if (avecFondamentales) {
+          const texteFond = `Passage initial : ${t.theorie?.fond ?? '—'}\n`
+            + `Rattrapage : ${t.theorieRattrapage.fond}`;
+          ligne.push(cellule(texteFond, t.theorieRattrapage.fondOk ? BFS.vert : BFS.rouge));
+        }
+        return ligne;
       }
-      return [
-        t.libelle,
-        t.theorie ? cellule(t.theorie.texte, t.theorie.ok ? BFS.vert : BFS.rouge) : '—',
-        t.theorie?.fond ? cellule(t.theorie.fond, t.theorie.fondOk ? BFS.vert : BFS.rouge)
-          : (t.theorie ? '—' : ''),
-      ];
+      const ligne = [t.libelle, t.theorie ? cellule(t.theorie.texte, t.theorie.ok ? BFS.vert : BFS.rouge) : '—'];
+      if (avecFondamentales) {
+        ligne.push(t.theorie?.fond ? cellule(t.theorie.fond, t.theorie.fondOk ? BFS.vert : BFS.rouge)
+          : (t.theorie ? '—' : ''));
+      }
+      return ligne;
     }),
   });
   y = doc.lastAutoTable.finalY + 4;
