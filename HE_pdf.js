@@ -214,6 +214,16 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
     // epreuves_pratiques pour ce stagiaire.
     sb.from('resultats_symbole').select('symbole_code, preconisation, theorie_ok, pratique_ok').eq('stagiaire_id', stagiaireId),
   ]);
+  // 2026-09-22 (bug remonté par Jeremy) : le formateur affiché sur l'avis
+  // (nom + signature) doit être celui AFFECTÉ à la session
+  // (session.formateur_id), pas forcément la personne actuellement
+  // connectée qui génère le document — un formateur peut corriger/éditer
+  // la session d'un collègue. Repli sur S.profil si la session n'a pas
+  // (encore) de formateur affecté.
+  const { data: formateurSession } = session?.formateur_id
+    ? await sb.from('formateurs').select('nom, prenom, signature_data').eq('id', session.formateur_id).single()
+    : { data: null };
+  const formateurAffiche = formateurSession || S.profil || null;
   const ep = (epreuves || []).find(e => (e.type_epreuve || 'initiale') === 'initiale') || null;
   const epRattrapage = (epreuves || []).find(e => e.type_epreuve === 'rattrapage') || null;
   const preconisationParSymbole = Object.fromEntries(
@@ -362,7 +372,7 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
       ? `${ep.score_brut}/${ep.score_total} (${Math.round((ep.taux || 0) * 100)} %)` : '—');
   const nomFormateurAffiche = ev
     ? `${ev.formateur || '—'} (formateur externe)`
-    : (S.profil ? `${S.profil.nom || ''} ${S.profil.prenom || ''}`.trim() : '—');
+    : (formateurAffiche ? `${formateurAffiche.nom || ''} ${formateurAffiche.prenom || ''}`.trim() : '—');
   const observationsAffichees = ev
     ? `Évaluation théorique réalisée par un organisme/formateur extérieur à BFS.`
       + ` ${ev.theorique_validee === false ? 'Non validée.' : 'Validée.'}`
@@ -525,8 +535,9 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
   });
   // Signature du formateur, pré-enregistrée une fois depuis "Mon compte"
   // (2026-08-27, demande de Jeremy) : apposée automatiquement, plus besoin
-  // de signer à la main à chaque avis.
-  ajouterImageSure(doc, S.profil?.signature_data, null,
+  // de signer à la main à chaque avis. 2026-09-22 : celle du formateur DE LA
+  // SESSION (formateurAffiche), pas forcément celle de la personne connectée.
+  ajouterImageSure(doc, formateurAffiche?.signature_data, null,
     marge + largeurUtile * 0.55 + 28, doc.lastAutoTable.finalY - 9, 26, 8);
   y = doc.lastAutoTable.finalY + 5;
 
@@ -925,6 +936,13 @@ async function construireDocPreuveExamen(stagiaireId) {
     sb.from('epreuves_theoriques').select('*').eq('stagiaire_id', stagiaireId).in('type_epreuve', ['initiale', 'rattrapage']),
     sb.from('resultats_symbole').select('*').eq('stagiaire_id', stagiaireId),
   ]);
+  // 2026-09-22 (bug remonté par Jeremy) : formateur AFFECTÉ à la session
+  // (pas la personne connectée qui génère le document) — même correctif
+  // que sur l'avis/titre, voir genererTitrePdf plus haut.
+  const { data: formateurSession } = session?.formateur_id
+    ? await sb.from('formateurs').select('nom, prenom, signature_data').eq('id', session.formateur_id).single()
+    : { data: null };
+  const formateurAffiche = formateurSession || S.profil || null;
   const ep = (epreuves || []).find(e => (e.type_epreuve || 'initiale') === 'initiale') || null;
   const epRattrapage = (epreuves || []).find(e => e.type_epreuve === 'rattrapage') || null;
   const preconisationParSymbole = Object.fromEntries(
@@ -1052,7 +1070,7 @@ async function construireDocPreuveExamen(stagiaireId) {
     body: [
       ['ENTREPRISE', st.entreprise || session?.entreprise || '—'],
       ['CANDIDAT', `${st.nom || ''} ${st.prenom || ''}`.trim()],
-      ['FORMATEUR', S.profil ? `${S.profil.nom || ''} ${S.profil.prenom || ''}`.trim() : '—'],
+      ['FORMATEUR', formateurAffiche ? `${formateurAffiche.nom || ''} ${formateurAffiche.prenom || ''}`.trim() : '—'],
     ],
   });
   y = doc.lastAutoTable.finalY + 4;

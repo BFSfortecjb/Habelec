@@ -213,6 +213,21 @@ async function modifierLieuFormation() {
   await ouvrirSession(S.session.id);
 }
 
+// 2026-09-22 (bug remonté par Jeremy) : l'avis d'habilitation affichait
+// jusqu'ici le formateur CONNECTÉ (S.profil) au moment de la génération,
+// pas forcément celui affecté à la session — problématique quand un
+// formateur corrige/édite la session d'un collègue. sessions_formation a
+// déjà une colonne formateur_id (par défaut celui qui crée la session,
+// voir nouvelleSession) ; genererTitrePdf/genererPreuveExamenPdf (HE_pdf.js)
+// utilisent désormais ce formateur-là plutôt que S.profil.
+async function changerFormateurSession(formateurId) {
+  const { error } = await sb.from('sessions_formation')
+    .update({ formateur_id: formateurId }).eq('id', S.session.id);
+  if (error) return erreurSupabase('Modification du formateur de la session', error);
+  S.session.formateur_id = formateurId;
+  toast('Formateur de la session mis à jour');
+}
+
 function genererCodeAcces() {
   // Sans caractères ambigus (0/O, 1/I) : le code est dicté à voix haute en salle
   const alpha = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -239,10 +254,15 @@ async function rendreDetailSession(zone) {
   const s = S.session;
   zone.innerHTML = '<p class="chargement">Chargement…</p>';
 
-  const [{ data: stagiaires }, { data: suivi }] = await Promise.all([
+  const [{ data: stagiaires }, { data: suivi }, { data: formateurs }] = await Promise.all([
     sb.from('stagiaires').select('*, stagiaire_symboles(symbole_code)')
       .eq('session_id', s.id).order('ordre').order('nom'),
     sb.from('v_suivi_session').select('*').eq('session_id', s.id),
+    // 2026-09-22 (demande de Jeremy) : liste des formateurs de l'organisme,
+    // pour le sélecteur "Formateur de la session" — c'est LUI qui doit
+    // apparaître sur l'avis/titre généré, pas forcément la personne
+    // actuellement connectée (qui peut juste corriger/éditer la session).
+    sb.from('formateurs').select('id, nom, prenom').eq('organisme_id', S.organisme.id).order('nom'),
   ]);
   const suiviPar = Object.fromEntries((suivi || []).map(x => [x.stagiaire_id, x]));
 
@@ -285,12 +305,17 @@ async function rendreDetailSession(zone) {
       <div><b>Code à dicter en salle</b><div class="code-geant">${esc(s.code_acces)}</div></div>
       <div><b>Adresse de connexion stagiaires</b><div><code>${esc(lienStagiaire)}</code></div>
         <button class="lien" onclick="navigator.clipboard.writeText('${esc(lienStagiaire)}');toast('Lien copié')">Copier le lien</button></div>
-      <details class="qr-repliable">
-        <summary><b>QR code examen</b></summary>
-        <div id="qr-passation"></div>
-        <p id="qr-erreur" class="erreur-discrete" hidden></p>
-        <button class="lien" onclick="telechargerQrPassation()">Télécharger l'image</button>
-      </details>
+      <div><b>N° de session Galaxy</b><div>${esc(s.numero_session_galaxy) || '<i>non renseigné</i>'}</div>
+        <button class="lien" onclick="modifierNumeroGalaxy()">Modifier</button></div>
+      <div><b>Lieu de la formation</b><div>${esc(s.lieu) || '<i>non renseigné</i>'}</div>
+        <button class="lien" onclick="modifierLieuFormation()">Modifier</button></div>
+      <div><b>Formateur de la session</b>
+        <div><select onchange="changerFormateurSession(this.value)">
+          ${(formateurs || []).map(f => `<option value="${f.id}" ${f.id === s.formateur_id ? 'selected' : ''}>
+            ${esc(f.nom)} ${esc(f.prenom)}</option>`).join('')}
+        </select></div>
+        <p class="aide">C'est ce formateur qui apparaît sur l'avis d'habilitation, pas forcément la
+          personne connectée — par défaut celui qui a créé la session.</p></div>
       <details class="qr-repliable">
         <summary><b>QCM de positionnement (entraînement libre)</b></summary>
         <div id="qr-entrainement"></div>
@@ -300,10 +325,12 @@ async function rendreDetailSession(zone) {
         <button class="lien" onclick="navigator.clipboard.writeText('${esc(lienEntrainement)}');toast('Lien copié')">Copier le lien</button>
         <button class="lien" onclick="voirPositionnementsSession()">📊 Voir tous les positionnements de la session</button>
       </details>
-      <div><b>N° de session Galaxy</b><div>${esc(s.numero_session_galaxy) || '<i>non renseigné</i>'}</div>
-        <button class="lien" onclick="modifierNumeroGalaxy()">Modifier</button></div>
-      <div><b>Lieu de la formation</b><div>${esc(s.lieu) || '<i>non renseigné</i>'}</div>
-        <button class="lien" onclick="modifierLieuFormation()">Modifier</button></div>
+      <details class="qr-repliable">
+        <summary><b>QR code examen</b></summary>
+        <div id="qr-passation"></div>
+        <p id="qr-erreur" class="erreur-discrete" hidden></p>
+        <button class="lien" onclick="telechargerQrPassation()">Télécharger l'image</button>
+      </details>
       <div><b>Règle de réussite</b>
         <div>${Math.round(s.seuil_global * 100)} % de bonnes réponses
           ${s.exiger_fondamentales ? '<br>+ 100 % des questions fondamentales' : ''}</div></div>
