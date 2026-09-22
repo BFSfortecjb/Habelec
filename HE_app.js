@@ -1207,7 +1207,9 @@ async function envoyerSecretariat() {
 
   ouvrirModale('Envoi secrétariat', `
     <p class="aide">Envoie à jour l'avis d'habilitation + la preuve d'examen de chaque stagiaire
-      coché ci-dessous, dans un seul email au secrétariat.
+      coché ci-dessous, dans un seul email au secrétariat (les copies de QCM et le récapitulatif
+      restent disponibles sur le Drive de la session, sans être joints au mail pour ne pas le
+      surcharger).
       Objet : <b>Habilitation électrique — ${esc(s.numero_session_galaxy || '—')}</b></p>
     <form id="form-envoi-secretariat" class="formulaire">
       <fieldset><legend>Stagiaires (${eligibles.length} avec titre généré)</legend>
@@ -1249,10 +1251,16 @@ async function envoyerSecretariat() {
         await sauvegarderDocumentDrive(s.id, preuve.nomFichier, preuve.doc, nomDossier);
 
         // 2026-09-18 (demande de Jeremy) : copie de QCM complète de ce
-        // stagiaire jointe elle aussi, pour archivage secrétariat.
+        // stagiaire — archivée sur Drive pour chaque stagiaire, mais
+        // PAS jointe à l'email (2026-09-22, bug remonté par Jeremy : avec
+        // plusieurs stagiaires, la somme des copies de QCM — documents
+        // longs, question par question — fait dépasser le budget CPU de
+        // la fonction d'envoi de mail côté serveur ; celle-ci plante alors
+        // sans réponse exploitable, d'où l'absence de message de réussite
+        // OU d'erreur, et aucun mail envoyé. Les copies restent disponibles
+        // sur le Drive de la session, seulement plus en pièce jointe mail.)
         const copie = await genererCopieQcmPdf(id, { sauvegarder: false });
         if (copie?.doc) {
-          piecesJointes.push({ nom: copie.nomFichier, base64: copie.doc.output('datauristring').split(',')[1] });
           await sauvegarderDocumentDrive(s.id, copie.nomFichier, copie.doc, nomDossier);
         }
       } catch (e) {
@@ -1280,21 +1288,55 @@ async function envoyerSecretariat() {
     const nomsInclus = eligibles.filter(st => idsChoisis.includes(st.id) && !echecs.includes(st.id))
       .map(st => `${st.nom} ${st.prenom}`);
     const sujet = `Habilitation électrique — ${s.numero_session_galaxy || '—'}`;
-    const texte = `Bonjour,\n\nCi-joint l'avis d'habilitation, la preuve d'examen et la copie de QCM pour :\n`
+    const texte = `Bonjour,\n\nCi-joint l'avis d'habilitation et la preuve d'examen pour :\n`
       + nomsInclus.map(n => `  - ${n}`).join('\n')
       + `\n\nSession : ${s.intitule || ''} (n° Galaxy ${s.numero_session_galaxy || '—'})`
       + `\n\nLe récapitulatif de session (titres validés/non validés et recommandations) est également joint.`
+      + `\n\nLes copies de QCM de chaque stagiaire sont disponibles sur le Drive de la session `
+      + '(non jointes ici pour ne pas surcharger le mail).'
       + (echecs.length ? `\n\n${echecs.length} stagiaire(s) n'a/ont pas pu être inclus (erreur de génération).` : '')
       + '\n\n— Message généré automatiquement par Habelec.';
+
+    // 2026-09-22 : garde-fou taille — même sans QCM en pièce jointe, avis +
+    // preuve + récap de plusieurs stagiaires pourraient encore être trop
+    // volumineux pour la fonction d'envoi (limite ~20 Mo côté serveur,
+    // et surtout budget CPU limité). On avertit clairement plutôt que de
+    // laisser la fonction planter sans réponse exploitable.
+    const tailleEstimee = piecesJointes.reduce((s, p) => s + (p.base64?.length || 0), 0);
+    if (tailleEstimee > 15 * 1024 * 1024) {
+      return toast("Trop de documents pour un seul envoi (pièces jointes trop volumineuses) — "
+        + 'décoche une partie des stagiaires et envoie en plusieurs fois.', 'erreur', 9000);
+    }
+
+    // 2026-09-22 (bug remonté par Jeremy — aucun message, ni succès ni erreur,
+    // et aucun mail reçu) : filet de sécurité en plus du try/catch normal —
+    // si l'appel ne se règle jamais (fonction serveur plantée en plein
+    // traitement, sans réponse HTTP propre), on force malgré tout un message
+    // d'erreur au bout de 25 s plutôt que de laisser l'utilisateur sans
+    // aucun retour.
+    let etabli = false;
+    const delaiSecours = setTimeout(() => {
+      if (!etabli) {
+        etabli = true;
+        toast("L'envoi au secrétariat ne répond pas (délai dépassé) — réessaie avec moins de "
+          + 'stagiaires à la fois, ou contacte le support.', 'erreur', 9000);
+      }
+    }, 25000);
 
     try {
       const { data, error } = await sb.functions.invoke('envoyer-mail', {
         body: { a: emailSecretariat, sujet, texte, pieces_jointes: piecesJointes },
       });
+      if (etabli) return;
+      etabli = true;
+      clearTimeout(delaiSecours);
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       toast(`Envoyé au secrétariat (${piecesJointes.length} fichier(s))`);
     } catch (e) {
+      if (etabli) return;
+      etabli = true;
+      clearTimeout(delaiSecours);
       erreurSupabase('Envoi au secrétariat', e);
     }
   });
