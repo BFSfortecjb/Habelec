@@ -310,12 +310,11 @@ async function rendreDetailSession(zone) {
       <div><b>Lieu de la formation</b><div>${esc(s.lieu) || '<i>non renseigné</i>'}</div>
         <button class="lien" onclick="modifierLieuFormation()">Modifier</button></div>
       <div><b>Formateur de la session</b>
-        <div><select onchange="changerFormateurSession(this.value)">
+        <div><select onchange="changerFormateurSession(this.value)"
+          title="C'est ce formateur qui apparaît sur l'avis d'habilitation, pas forcément la personne connectée — par défaut celui qui a créé la session.">
           ${(formateurs || []).map(f => `<option value="${f.id}" ${f.id === s.formateur_id ? 'selected' : ''}>
             ${esc(f.nom)} ${esc(f.prenom)}</option>`).join('')}
-        </select></div>
-        <p class="aide">C'est ce formateur qui apparaît sur l'avis d'habilitation, pas forcément la
-          personne connectée — par défaut celui qui a créé la session.</p></div>
+        </select></div></div>
       <details class="qr-repliable">
         <summary><b>QCM de positionnement (entraînement libre)</b></summary>
         <div id="qr-entrainement"></div>
@@ -466,13 +465,11 @@ function tableauBordGroupe(stagiaires, resultatsParStagiaire) {
   const titres = Object.entries(parTitre).sort((a, b) => a[0].localeCompare(b[0]));
   if (!titres.length) return '';
 
-  // Réductible : encore expérimental (« à voir à l'usage »), donc pas question de
-  // l'imposer en permanence — le formateur replie/déplie via <summary>, et le choix
-  // est mémorisé (localStorage) pour ne pas avoir à le refaire à chaque session.
-  const ouvert = localStorage.getItem('he_tableau_bord_ouvert') !== 'false';
+  // 2026-09-22 (demande de Jeremy) : toujours replié par défaut à l'ouverture
+  // d'une session — plus de mémorisation (localStorage) de l'état précédent,
+  // qui pouvait le laisser ouvert d'une session à l'autre.
   return `
-    <details class="carte tableau-bord-groupe" ${ouvert ? 'open' : ''}
-      ontoggle="localStorage.setItem('he_tableau_bord_ouvert', this.open)">
+    <details class="carte tableau-bord-groupe">
       <summary><b>Tableau de bord — validation des titres du groupe</b></summary>
       <table class="tableau compact">
         <thead><tr><th>Titre</th><th>Stagiaires</th><th>Validés</th>
