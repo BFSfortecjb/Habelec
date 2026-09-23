@@ -134,7 +134,7 @@ async function rendreSessions(zone) {
     </div>
     <table class="tableau">
       <thead><tr><th>Intitulé</th><th>N° Galaxy</th><th>Entreprise</th><th>Début</th><th>Type</th>
-        <th>Code d'accès</th><th>Statut</th><th>Stagiaires</th><th></th></tr></thead>
+        <th>Code d'accès</th><th>Statut</th><th>Stagiaires</th><th>Secrétariat</th><th></th></tr></thead>
       <tbody>${(data || []).map(s => `
         <tr>
           <td><a href="#" onclick="ouvrirSession('${s.id}');return false">${esc(s.intitule)}</a></td>
@@ -145,11 +145,30 @@ async function rendreSessions(zone) {
           <td><code class="code-acces">${esc(s.code_acces)}</code></td>
           <td><span class="etat ${s.statut}">${esc(s.statut.replace(/_/g, ' '))}</span></td>
           <td>${s.stagiaires?.[0]?.count ?? 0}</td>
+          <td>${rendreStatutEnvoiSecretariat(s)}</td>
           <td><button class="icone" title="Supprimer la session"
                 onclick="supprimerSession('${s.id}')">🗑</button></td>
-        </tr>`).join('') || '<tr><td colspan="9" class="vide">Aucune session pour le moment.</td></tr>'}
+        </tr>`).join('') || '<tr><td colspan="10" class="vide">Aucune session pour le moment.</td></tr>'}
       </tbody>
     </table>`;
+}
+
+// 2026-09-23 (demande de Jeremy) : pastille de confirmation d'envoi au
+// secrétariat sur le tableau de bord des sessions — reflète le dernier
+// statut CONFIRMÉ par le serveur (envoyerSecretariat() ne l'écrit qu'après
+// réponse effective de la fonction d'envoi, jamais au simple clic du
+// bouton) : vert = dernier envoi réussi, rouge = dernier envoi en échec,
+// orange = jamais envoyé pour cette session.
+function rendreStatutEnvoiSecretariat(s) {
+  const quand = s.envoi_secretariat_le ? dateFr(s.envoi_secretariat_le) : '';
+  if (s.envoi_secretariat_statut === 'ok') {
+    return `<span title="Envoyé au secrétariat le ${quand}" style="color:#1a9c4a;font-size:1.3em">●</span>`;
+  }
+  if (s.envoi_secretariat_statut === 'echec') {
+    return `<span title="Échec du dernier envoi (${quand}) — ${esc(s.envoi_secretariat_detail || '')}"
+      style="color:#c0392b;font-weight:bold">✕</span>`;
+  }
+  return `<span title="Jamais envoyé au secrétariat" style="color:#e08a1e;font-size:1.3em">●</span>`;
 }
 
 async function nouvelleSession() {
@@ -1320,6 +1339,7 @@ async function envoyerSecretariat() {
         etabli = true;
         toast("L'envoi au secrétariat ne répond pas (délai dépassé) — réessaie avec moins de "
           + 'stagiaires à la fois, ou contacte le support.', 'erreur', 9000);
+        enregistrerStatutEnvoiSecretariat(s.id, 'echec', 'Délai dépassé (pas de réponse du serveur)');
       }
     }, 25000);
 
@@ -1333,13 +1353,29 @@ async function envoyerSecretariat() {
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       toast(`Envoyé au secrétariat (${piecesJointes.length} fichier(s))`);
+      // 2026-09-23 (demande de Jeremy) : la pastille du tableau de bord des
+      // sessions ne se met à jour qu'ICI, une fois la réussite CONFIRMÉE
+      // par la réponse du serveur — jamais au simple clic du bouton.
+      enregistrerStatutEnvoiSecretariat(s.id, 'ok', null);
     } catch (e) {
       if (etabli) return;
       etabli = true;
       clearTimeout(delaiSecours);
       erreurSupabase('Envoi au secrétariat', e);
+      enregistrerStatutEnvoiSecretariat(s.id, 'echec', e?.message || String(e));
     }
   });
+}
+
+async function enregistrerStatutEnvoiSecretariat(sessionId, statut, detail) {
+  const { error } = await sb.from('sessions_formation').update({
+    envoi_secretariat_statut: statut,
+    envoi_secretariat_le: new Date().toISOString(),
+    envoi_secretariat_detail: detail,
+  }).eq('id', sessionId);
+  // Best-effort : un échec d'enregistrement de CE statut n'empêche pas
+  // l'utilisateur de continuer, on le journalise seulement.
+  if (error) DEBUG.erreur('enregistrerStatutEnvoiSecretariat', error.message);
 }
 
 
