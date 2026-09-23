@@ -3037,20 +3037,21 @@ function afficherVerification(zone, filtre) {
     <input type="search" id="recherche-verification" placeholder="Rechercher (nom, n° de vérification, session...)"
       value="${esc(filtre || '')}" style="margin-bottom:10px;max-width:340px">
     <table class="tableau">
-      <thead><tr><th>N° de vérification</th><th>Nom</th><th>Prénom</th><th>Session</th>
+      <thead><tr><th>N° de vérification</th><th>Nom</th><th>Prénom</th><th>Titres (symboles)</th><th>Session</th>
         <th>N° session Galaxy</th><th>Date de délivrance</th><th>À recycler avant</th><th></th></tr></thead>
       <tbody>${data.map(t => `
         <tr>
           <td>${esc(t.numero)}</td>
           <td>${esc(t.nom)}</td>
           <td>${esc(t.prenom)}</td>
+          <td>${(t.symboles && t.symboles.length) ? t.symboles.map(c => esc(libelleSymbole(c))).join(', ') : '—'}</td>
           <td>${esc(t.session || '—')}</td>
           <td>${esc(t.numero_session_galaxy || '—')}</td>
           <td>${dateFr(t.delivre_le)}</td>
           <td>${dateFr(t.recycler_avant)}</td>
           <td><button class="icone" title="Purger ce titre (test, doublon...)"
                 onclick="purgerTitreVerification('${t.id}')">🗑</button></td>
-        </tr>`).join('') || '<tr><td colspan="8" class="vide">Aucun titre ne correspond.</td></tr>'}
+        </tr>`).join('') || '<tr><td colspan="9" class="vide">Aucun titre ne correspond.</td></tr>'}
       </tbody>
     </table>`;
 }
