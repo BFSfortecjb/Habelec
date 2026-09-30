@@ -26,10 +26,43 @@
 
 const ENT = { code: null, jeton: null, session: null, questions: [], index: 0, symboles: null, stagiaires: null };
 
+// 2026-09-29 (demande de Jeremy) : certains stagiaires actualisent la page
+// par erreur pendant le QCM de positionnement et perdent leur progression.
+// On la met en cache dans le navigateur (localStorage) le temps de finir,
+// sur le même principe que le cache de l'examen réel (voir HE_qcm.js).
+const CLE_CACHE_ENTRAINEMENT = 'habelec_cache_entrainement';
+
+function sauvegarderCacheEntrainement() {
+  try {
+    localStorage.setItem(CLE_CACHE_ENTRAINEMENT, JSON.stringify({
+      code: ENT.code, jeton: ENT.jeton, session: ENT.session,
+      symbolesChoisis: ENT.symbolesChoisis, questions: ENT.questions, index: ENT.index,
+    }));
+  } catch (e) { /* silencieux — le cache n'est qu'un confort, jamais bloquant */ }
+}
+
+function restaurerCacheEntrainement() {
+  try {
+    const brut = localStorage.getItem(CLE_CACHE_ENTRAINEMENT);
+    if (!brut) return false;
+    const c = JSON.parse(brut);
+    if (!c || !Array.isArray(c.questions) || !c.questions.length) return false;
+    ENT.code = c.code; ENT.jeton = c.jeton; ENT.session = c.session;
+    ENT.symbolesChoisis = c.symbolesChoisis; ENT.questions = c.questions;
+    ENT.index = c.index || 0;
+    return true;
+  } catch (e) { return false; }
+}
+
+function effacerCacheEntrainement() {
+  try { localStorage.removeItem(CLE_CACHE_ENTRAINEMENT); } catch (e) { /* silencieux */ }
+}
+
 async function ecranEntrainement(cible) {
   const codePrerempli = new URLSearchParams(location.hash.split('?')[1] || '').get('code');
   if (!ENT.code && codePrerempli) ENT.code = codePrerempli.toUpperCase();
   if (ENT.questions.length) return rendreQuestionEntrainement(cible);
+  if (restaurerCacheEntrainement()) return rendreQuestionEntrainement(cible);
 
   // 2026-09-04 (correctif) : la liste des titres ne peut pas venir de
   // S.referentiel ici — ce visiteur n'a pas de compte, et les SELECT
@@ -101,7 +134,8 @@ function rendreChoixStagiaireEntrainement(cible) {
         ça ne compte toujours pas pour ton évaluation officielle.</p>
       <div class="grille-noms">
         ${ENT.stagiaires.map(s => `
-          <button class="nom" onclick="choisirStagiaireEntrainement('${esc(s.jeton)}')">${esc(s.nom)} ${esc(s.prenom)}</button>`).join('')}
+          <button class="nom${s.recyclage ? ' nom-recyclage' : ''}" title="${s.recyclage ? 'Recyclage' : 'Formation initiale'}"
+            onclick="choisirStagiaireEntrainement('${esc(s.jeton)}')">${esc(s.nom)} ${esc(s.prenom)}</button>`).join('')}
       </div>
     </div>`;
 }
@@ -112,12 +146,14 @@ async function choisirStagiaireEntrainement(jeton) {
 }
 
 async function lancerTirageEntrainement() {
+  effacerCacheEntrainement();
   try {
     const res = await rpc('tirage_positionnement', { p_code: ENT.code, p_symboles: ENT.symbolesChoisis });
     ENT.questions = (res.questions || []).map(q => ({ ...q, choix: [], corrige: false }));
     ENT.session = res.session;
     ENT.index = 0;
     if (!ENT.questions.length) return toast('Aucune question disponible pour ce choix', 'erreur');
+    sauvegarderCacheEntrainement();
     rendreQuestionEntrainement($('#ecran'));
   } catch (e) { erreurSupabase('Tirage du QCM de positionnement', e); }
 }
@@ -180,6 +216,7 @@ function rendreQuestionEntrainement(cible) {
 
   $$('.propositions input').forEach(i => i.addEventListener('change', () => {
     q.choix = $$('.propositions input:checked').map(x => x.value);
+    sauvegarderCacheEntrainement();
   }));
 }
 
@@ -187,15 +224,18 @@ function corrigerQuestionEntrainement() {
   const q = ENT.questions[ENT.index];
   if (!q.choix.length) return toast('Choisis au moins une réponse', 'erreur');
   q.corrige = true;
+  sauvegarderCacheEntrainement();
   rendreQuestionEntrainement($('#ecran'));
 }
 
 function naviguerEntrainement(delta) {
   ENT.index = Math.max(0, Math.min(ENT.questions.length - 1, ENT.index + delta));
+  sauvegarderCacheEntrainement();
   rendreQuestionEntrainement($('#ecran'));
 }
 
 async function finEntrainement() {
+  effacerCacheEntrainement();
   const qs = ENT.questions;
   const bonnes = qs.filter(reponseCorrecte).length;
   const fondEchouees = qs.filter(q => q.fondamentale && !reponseCorrecte(q)).length;
@@ -240,6 +280,7 @@ async function finEntrainement() {
 }
 
 function recommencerEntrainement() {
+  effacerCacheEntrainement();
   ENT.questions = [];
   ENT.index = 0;
   ENT.jeton = null;

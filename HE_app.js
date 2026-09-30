@@ -728,7 +728,7 @@ async function voirPositionnementsSession() {
   ouvrirModale('Positionnements — vue de session', '<p class="aide">Chargement…</p>');
   const s = S.session;
   const { data: stagiaires } = await sb.from('stagiaires')
-    .select('id, nom, prenom').eq('session_id', s.id).order('nom');
+    .select('id, nom, prenom, recyclage').eq('session_id', s.id).order('nom');
   const ids = (stagiaires || []).map(st => st.id);
   if (!ids.length) {
     return $('#modale .corps-modale').replaceChildren(document.createRange().createContextualFragment(
@@ -763,7 +763,8 @@ async function voirPositionnementsSession() {
       const tentatives = parStagiaire[st.id]; // déjà triées, plus récente en premier
       return `
         <details class="carte">
-          <summary><b>${esc(st.nom)} ${esc(st.prenom)}</b> — ${tentatives.length} tentative(s)</summary>
+          <summary><b class="${st.recyclage ? 'nom-recyclage' : ''}" title="${st.recyclage ? 'Recyclage' : 'Formation initiale'}"
+              >${esc(st.nom)} ${esc(st.prenom)}</b> — ${tentatives.length} tentative(s)</summary>
           ${tentatives.map((p, i) => {
             const pct = p.nb_questions ? Math.round((p.nb_bonnes / p.nb_questions) * 100) : 0;
             return `<p>${i === 0 ? '<span class="puce" title="Compte dans le condensé par défaut">actuelle</span> ' : ''}
@@ -1400,6 +1401,9 @@ async function editerStagiaire(id) {
         <label>Fonction <input name="fonction" value="${esc(st.fonction)}"></label>
         <label>Affectation <input name="affectation" value="${esc(st.affectation)}"></label>
       </div>
+      <label class="case"><input type="checkbox" name="recyclage" ${st.recyclage ? 'checked' : ''}>
+        Recyclage <span class="aide">(coché = recyclage, décoché = formation initiale — affiché en
+        bleu sur le QCM de positionnement)</span></label>
       <label>Entreprise (employeur du stagiaire)
         <input name="entreprise" value="${esc(st.entreprise || '')}"
           placeholder="Ex : Entreprise Client SARL — jamais BFS, l'organisme de formation">
@@ -1454,6 +1458,7 @@ async function editerStagiaire(id) {
       entreprise: f.entreprise.value.trim(),
       date_naissance: f.date_naissance.value || null,
       domaines: $$('#form-stagiaire input[name=domaine]:checked').map(i => i.value),
+      recyclage: f.recyclage.checked,
     };
     // 2026-09-18 (demande de Jeremy) : même sécurité que côté stagiaire —
     // évite qu'une correction manuelle réintroduise une date du jour.
@@ -1880,9 +1885,12 @@ async function importerStagiairesExcel(input) {
       const domaines = val('Domaines').split(/[,;/ ]+/)
         .map(d => d.trim().toUpperCase()).filter(d => ['TBT', 'BT', 'HTA', 'HTB'].includes(d));
 
+      // 2026-09-28 (bug remonté par Jeremy) : la colonne "Entreprise" du
+      // fichier Excel n'était jamais reprise à l'import — seuls Fonction et
+      // Affectation l'étaient. Corrigé.
       const { data, error } = await sb.from('stagiaires').insert({
         session_id: S.session.id, nom: nom.toUpperCase(), prenom,
-        fonction: val('Fonction'), affectation: val('Affectation'), domaines,
+        fonction: val('Fonction'), affectation: val('Affectation'), entreprise: val('Entreprise'), domaines,
       }).select().single();
       if (error) { DEBUG.erreur('Import ligne', error.message); ignorees++; continue; }
 
