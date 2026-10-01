@@ -300,6 +300,14 @@ async function router() {
     return ecranEntrainement(cible);
   }
   if (!S.utilisateur) return ecranConnexion(cible);
+  // 2026-10-01 (demande de Jeremy) : écran pratique d'UN SEUL stagiaire, sans
+  // la coquille (onglets/en-tête) de l'espace formateur — utilisé en iframe
+  // par la « Pratique multiple » (voir HE_pratique.js) pour afficher 2
+  // grilles d'évaluation côte à côte, chacune dans son propre contexte
+  // JavaScript totalement indépendant (même session Supabase, partagée via
+  // le localStorage du même site). Authentification formateur obligatoire
+  // (comme pour tout l'espace formateur) — déjà vérifiée juste au-dessus.
+  if (location.hash.startsWith('#pratique-solo')) return ecranPratiqueSolo(cible);
   return ecranFormateur(cible);
 }
 

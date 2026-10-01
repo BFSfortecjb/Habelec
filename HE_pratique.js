@@ -122,7 +122,7 @@ async function rendrePratique(zone) {
     (S.referentiel.gabaritsParSymbole[sym] || []).includes(gabaritCode) && theorieOkParSymbole[sym] === false);
 
   zone.innerHTML = `
-    <button class="lien" onclick="retour('session')">← Retour à la session</button>
+    ${S.pratiqueSoloMode ? '' : `<button class="lien" onclick="retour('session')">← Retour à la session</button>`}
     <div class="barre-actions">
       <h2>Évaluation pratique — ${esc(st.prenom)} ${esc(st.nom)}</h2>
       <button class="principal" ${navigator.onLine ? '' : 'disabled title="Indisponible hors-ligne"'}
@@ -515,6 +515,105 @@ function telechargerRessourceMsp(ref) {
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+/* ===================================================================
+   Pratique multiple (2026-10-01, demande de Jeremy) : évaluer 2 stagiaires
+   en parallèle (ex. 2 armoires électriques côte à côte).
+
+   L'écran pratique existant s'appuie entièrement sur un état global unique
+   (S.stagiaire, utilisé par la notation, le cache hors-ligne, le scroll…) :
+   dédoubler cet écran en 2 colonnes dans la même page aurait fait se
+   marcher dessus les 2 évaluations à chaque clic. Solution retenue : 2
+   <iframe>, chacune chargée sur la route dédiée #pratique-solo?id=... —
+   2 contextes JavaScript totalement indépendants, mais la même session
+   Supabase (partagée via le localStorage du site), donc pas de reconnexion
+   à faire. Volontairement réservé aux écrans larges (tablette/PC) — voir
+   styles.css — une colonne par iframe devient illisible sur téléphone.
+   =================================================================== */
+
+async function choisirPratiqueMultiple() {
+  const s = S.session;
+  const { data: stagiaires, error } = await sb.from('stagiaires')
+    .select('id, nom, prenom').eq('session_id', s.id).order('nom');
+  if (error) return erreurSupabase('Chargement des stagiaires', error);
+  if (!stagiaires || stagiaires.length < 2) {
+    return toast('Il faut au moins 2 stagiaires dans la session pour une évaluation en parallèle', 'erreur');
+  }
+
+  const options = stagiaires.map(st => `<option value="${st.id}">${esc(st.nom)} ${esc(st.prenom)}</option>`).join('');
+  ouvrirModale('Évaluer 2 stagiaires en parallèle', `
+    <p class="aide">Ouvre 2 grilles d'évaluation pratique côte à côte, totalement indépendantes
+      l'une de l'autre — pratique pour suivre 2 stagiaires en même temps (ex. 2 armoires électriques).
+      Réservé aux écrans larges (tablette/PC).</p>
+    <form id="form-pratique-multiple" class="formulaire">
+      <label>Stagiaire 1 <select name="st1" required>
+        <option value="">— choisir —</option>${options}</select></label>
+      <label>Stagiaire 2 <select name="st2" required>
+        <option value="">— choisir —</option>${options}</select></label>
+      <div class="pied-modale">
+        <button type="button" onclick="fermerModale()">Annuler</button>
+        <button type="submit" class="principal">Ouvrir les 2 grilles</button>
+      </div>
+    </form>`);
+
+  $('#form-pratique-multiple').addEventListener('submit', ev => {
+    ev.preventDefault();
+    const f = ev.target;
+    if (!f.st1.value || !f.st2.value) return toast('Choisis les 2 stagiaires', 'erreur');
+    if (f.st1.value === f.st2.value) return toast('Choisis 2 stagiaires différents', 'erreur');
+    const st1 = stagiaires.find(st => st.id === f.st1.value);
+    const st2 = stagiaires.find(st => st.id === f.st2.value);
+    fermerModale();
+    S.pratiqueMultiple = [st1, st2];
+    S.ecran = 'pratique-multiple';
+    ecranFormateur($('#ecran'));
+  });
+}
+
+function rendrePratiqueMultiple(zone) {
+  const [st1, st2] = S.pratiqueMultiple || [];
+  if (!st1 || !st2) {
+    zone.innerHTML = `<div class="ecran-vide"><p>Aucun stagiaire sélectionné.</p>
+      <button class="lien" onclick="retour('session')">← Retour à la session</button></div>`;
+    return;
+  }
+  // location.pathname + location.search (sans le #...) : chaque iframe
+  // recharge l'application sur sa propre route #pratique-solo, indépendante
+  // de celle de la fenêtre principale.
+  const base = location.pathname + location.search;
+  zone.innerHTML = `
+    <button class="lien" onclick="retour('session')">← Retour à la session</button>
+    <p class="aide">Évaluation en parallèle — les 2 colonnes sont totalement indépendantes,
+      comme 2 onglets distincts. Non disponible sur petit écran.</p>
+    <div class="pratique-multiple">
+      <iframe src="${base}#pratique-solo?id=${encodeURIComponent(st1.id)}"
+        title="${esc(st1.nom)} ${esc(st1.prenom)}"></iframe>
+      <iframe src="${base}#pratique-solo?id=${encodeURIComponent(st2.id)}"
+        title="${esc(st2.nom)} ${esc(st2.prenom)}"></iframe>
+    </div>`;
+}
+
+// Écran pratique d'UN SEUL stagiaire, sans la coquille (onglets/en-tête) de
+// l'espace formateur — destiné à être chargé dans une <iframe> par l'écran
+// ci-dessus. Appelé directement par router() (HE_core.js) sur #pratique-solo.
+async function ecranPratiqueSolo(cible) {
+  const params = new URLSearchParams(location.hash.split('?')[1] || '');
+  const id = params.get('id');
+  if (!id) {
+    cible.innerHTML = '<div class="ecran-vide"><p>Stagiaire manquant dans le lien.</p></div>';
+    return;
+  }
+  const { data, error } = await sb.from('stagiaires')
+    .select('*, stagiaire_symboles(symbole_code)').eq('id', id).single();
+  if (error) {
+    cible.innerHTML = `<div class="ecran-vide"><p>${esc(error.message)}</p></div>`;
+    return;
+  }
+  S.stagiaire = data;
+  S.pratiqueSoloMode = true;
+  cible.innerHTML = '<main id="contenu" class="pratique-solo"></main>';
+  rendrePratique($('#contenu'));
 }
 
 /* -------- Popup Consignes MSP (2026-08-28, demande de Jeremy) -----------

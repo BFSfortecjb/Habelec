@@ -93,6 +93,7 @@ const RENDU = {
   motsdepasse:  rendreMotsDePasse,
   moncompte:    rendreMonCompte,
   pratique:     rendrePratique,     // défini dans HE_pratique.js
+  'pratique-multiple': rendrePratiqueMultiple, // défini dans HE_pratique.js
 };
 
 function ecranFormateur(cible) {
@@ -362,12 +363,22 @@ async function rendreDetailSession(zone) {
         <button onclick="modeleExcelStagiaires()" title="Télécharger un modèle Excel">⬇ Modèle Excel</button>
         <label class="bouton-fichier" title="Importer une liste de stagiaires">⬆ Importer Excel
           <input type="file" accept=".xlsx,.xls,.csv" hidden onchange="importerStagiairesExcel(this)"></label>
+        <!-- 2026-10-01 (demande de Jeremy) : fusion des 2 boutons ci-dessous en un
+             seul « Export » (télécharge le ZIP, PUIS ouvre l'envoi secrétariat).
+             RETOUR ARRIÈRE si besoin : remettre ces 2 lignes à la place du bouton
+             Export juste en dessous — les fonctions d'origine telechargerZipTitres()
+             et envoyerSecretariat() n'ont pas été modifiées.
         <button title="Envoie l'avis d'habilitation + la preuve d'examen de chaque stagiaire ayant un titre au secrétariat"
           onclick="envoyerSecretariat()">✉️ Envoi secrétariat</button>
-        ${S.organisme?.drive_bouton_test_actif ? `<button title="Envoie un petit fichier de test dans le dossier Drive de cette session, sans envoyer aucun mail — pour vérifier la configuration Google Drive"
-          onclick="testerSauvegardeDrive()">☁️ Tester Drive</button>` : ''}
         <button title="Télécharge un ZIP avec l'avis d'habilitation + la preuve d'examen de chaque stagiaire ayant un titre"
           onclick="telechargerZipTitres()">🗜 Télécharger ZIP</button>
+        -->
+        <button title="Télécharge le ZIP (avis + preuve d'examen de chaque stagiaire ayant un titre), PUIS ouvre l'envoi au secrétariat"
+          onclick="exporterSessionComplet()">📤 Export</button>
+        ${S.organisme?.drive_bouton_test_actif ? `<button title="Envoie un petit fichier de test dans le dossier Drive de cette session, sans envoyer aucun mail — pour vérifier la configuration Google Drive"
+          onclick="testerSauvegardeDrive()">☁️ Tester Drive</button>` : ''}
+        <button title="Évalue 2 stagiaires en parallèle : ouvre 2 grilles de pratique indépendantes côte à côte (tablette/PC)"
+          onclick="choisirPratiqueMultiple()">👥 Pratique multiple</button>
         <button class="principal" onclick="nouveauStagiaire()">+ Ajouter</button>
       </div>
     </div>
@@ -1086,6 +1097,18 @@ async function genererTousLesQcm() {
 // dont la théorie est corrigée mais qui n'a pas encore de titre (le bouton
 // individuel 🏅 reste inchangé pour une régénération au cas par cas, avec sa
 // modale de préconisation habituelle si besoin — voir genererTitrePdf).
+// 2026-10-01 (demande de Jeremy) : bouton unique « Export » qui enchaîne les 2
+// actions existantes, SANS modifier leur code — en cas de souci, il suffit de
+// remettre les 2 boutons d'origine (voir le commentaire au-dessus, dans
+// rendreDetailSession) pour revenir en arrière instantanément. Le ZIP est
+// généré et téléchargé d'abord, puis la modale d'envoi secrétariat s'ouvre
+// une fois le ZIP terminé (chaque PDF y est déjà régénéré et attendu — rien
+// à changer de ce côté, voir envoyerSecretariat()).
+async function exporterSessionComplet() {
+  await telechargerZipTitres();
+  await envoyerSecretariat();
+}
+
 async function telechargerZipTitres() {
   const s = S.session;
   const { data: stagiaires } = await sb.from('stagiaires')
