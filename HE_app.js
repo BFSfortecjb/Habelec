@@ -1273,6 +1273,14 @@ async function envoyerSecretariat() {
     fermerModale();
     toast(`Préparation de ${idsChoisis.length} dossier(s)…`);
 
+    // 2026-10-01 (demande de Jeremy) : trace dans le Journal des interventions
+    // qui a déclenché l'envoi — best-effort (catch silencieux : un souci de
+    // journalisation ne doit jamais empêcher l'envoi lui-même).
+    rpc('journaliser_envoi_secretariat', {
+      p_session_id: s.id, p_action: 'envoi_secretariat_demande',
+      p_details: { nb_stagiaires: idsChoisis.length },
+    }).catch(e => DEBUG.erreur('Journal — demande d\'envoi secrétariat', e.message));
+
     const piecesJointes = [];
     const echecs = [];
     const nomDossier = nomDossierSession(s);
@@ -1312,6 +1320,7 @@ async function envoyerSecretariat() {
       }
     }
     if (!piecesJointes.length) {
+      journaliserResultatEnvoiSecretariat(s.id, false, 'Aucun document généré — envoi annulé');
       return toast('Aucun document généré — envoi annulé (voir le journal de debug)', 'erreur');
     }
 
@@ -1347,6 +1356,8 @@ async function envoyerSecretariat() {
     // laisser la fonction planter sans réponse exploitable.
     const tailleEstimee = piecesJointes.reduce((s, p) => s + (p.base64?.length || 0), 0);
     if (tailleEstimee > 15 * 1024 * 1024) {
+      journaliserResultatEnvoiSecretariat(s.id, false,
+        `Pièces jointes trop volumineuses (${Math.round(tailleEstimee / 1024 / 1024)} Mo)`);
       return toast("Trop de documents pour un seul envoi (pièces jointes trop volumineuses) — "
         + 'décoche une partie des stagiaires et envoie en plusieurs fois.', 'erreur', 9000);
     }
@@ -1364,6 +1375,7 @@ async function envoyerSecretariat() {
         toast("L'envoi au secrétariat ne répond pas (délai dépassé) — réessaie avec moins de "
           + 'stagiaires à la fois, ou contacte le support.', 'erreur', 9000);
         enregistrerStatutEnvoiSecretariat(s.id, 'echec', 'Délai dépassé (pas de réponse du serveur)');
+        journaliserResultatEnvoiSecretariat(s.id, false, 'Délai dépassé (pas de réponse du serveur)');
       }
     }, 25000);
 
@@ -1381,14 +1393,28 @@ async function envoyerSecretariat() {
       // sessions ne se met à jour qu'ICI, une fois la réussite CONFIRMÉE
       // par la réponse du serveur — jamais au simple clic du bouton.
       enregistrerStatutEnvoiSecretariat(s.id, 'ok', null);
+      journaliserResultatEnvoiSecretariat(s.id, true,
+        `${piecesJointes.length} fichier(s) — ${nomsInclus.join(', ')}`);
     } catch (e) {
       if (etabli) return;
       etabli = true;
       clearTimeout(delaiSecours);
       erreurSupabase('Envoi au secrétariat', e);
       enregistrerStatutEnvoiSecretariat(s.id, 'echec', e?.message || String(e));
+      journaliserResultatEnvoiSecretariat(s.id, false, e?.message || String(e));
     }
   });
+}
+
+// 2026-10-01 (demande de Jeremy) : une ligne « résultat » dans le Journal des
+// interventions de la session, juste après la ligne « demande » (voir plus
+// haut) — best-effort, ne doit jamais faire planter l'envoi lui-même.
+function journaliserResultatEnvoiSecretariat(sessionId, reussi, detail) {
+  rpc('journaliser_envoi_secretariat', {
+    p_session_id: sessionId,
+    p_action: reussi ? 'envoi_secretariat_reussi' : 'envoi_secretariat_echec',
+    p_details: { detail },
+  }).catch(e => DEBUG.erreur('Journal — résultat d\'envoi secrétariat', e.message));
 }
 
 async function enregistrerStatutEnvoiSecretariat(sessionId, statut, detail) {
@@ -1622,6 +1648,9 @@ async function voirJournalSession(sessionId) {
     reponse_saisie_formateur: 'Réponse saisie par le formateur',
     cle_question_corrigee: 'Clé de question corrigée',
     generation: 'Titre d\'habilitation généré',
+    envoi_secretariat_demande: '✉️ Envoi secrétariat demandé',
+    envoi_secretariat_reussi: '✅ Envoi secrétariat réussi',
+    envoi_secretariat_echec: '❌ Envoi secrétariat échoué',
   };
 
   ouvrirModale('Journal des interventions', `
@@ -1648,6 +1677,12 @@ function detailJournal(l) {
   }
   if (l.action === 'cle_question_corrigee') {
     return `Question n°${esc(d.question_numero)} — « ${esc((d.question_enonce || '').slice(0, 80))} »`;
+  }
+  if (l.action === 'envoi_secretariat_demande') {
+    return `${esc(d.nb_stagiaires)} stagiaire(s) sélectionné(s)`;
+  }
+  if (l.action === 'envoi_secretariat_reussi' || l.action === 'envoi_secretariat_echec') {
+    return esc(d.detail || '');
   }
   return esc(JSON.stringify(d));
 }
