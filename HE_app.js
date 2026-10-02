@@ -1293,137 +1293,28 @@ async function envoyerSecretariat() {
     if (!idsChoisis.length) return toast('Coche au moins un stagiaire', 'erreur');
 
     fermerModale();
-    toast(`Préparation de ${idsChoisis.length} dossier(s)…`);
+    toast(`Envoi en cours (${idsChoisis.length} dossier(s))… tu peux fermer cette page, `
+      + "l'envoi continuera côté serveur.", 'ok', 8000);
 
-    // 2026-10-01 (demande de Jeremy) : trace dans le Journal des interventions
-    // qui a déclenché l'envoi — best-effort (catch silencieux : un souci de
-    // journalisation ne doit jamais empêcher l'envoi lui-même).
-    rpc('journaliser_envoi_secretariat', {
-      p_session_id: s.id, p_action: 'envoi_secretariat_demande',
-      p_details: { nb_stagiaires: idsChoisis.length },
-    }).catch(e => DEBUG.erreur('Journal — demande d\'envoi secrétariat', e.message));
-
-    const piecesJointes = [];
-    const echecs = [];
-    const nomDossier = nomDossierSession(s);
-    for (const id of idsChoisis) {
-      try {
-        const avis = await genererTitrePdf(id, { sauvegarder: false });
-        if (!avis?.doc) { echecs.push(id); continue; }
-        const preuve = await genererPreuveExamenPdf(id, { sauvegarder: false });
-        piecesJointes.push(
-          { nom: avis.nomFichier, base64: avis.doc.output('datauristring').split(',')[1] },
-          { nom: preuve.nomFichier, base64: preuve.doc.output('datauristring').split(',')[1] },
-        );
-        // 2026-09-10 (demande de Jeremy) : sauvegarde Drive à l'envoi
-        // secrétariat aussi — appelée ici (et non via sauvegarder:true, qui
-        // relancerait un téléchargement local en double) et attendue
-        // (await) une par une pour ne jamais avoir deux appels concurrents
-        // qui créeraient chacun un dossier de session en double sur Drive.
-        await sauvegarderDocumentDrive(s.id, avis.nomFichier, avis.doc, nomDossier);
-        await sauvegarderDocumentDrive(s.id, preuve.nomFichier, preuve.doc, nomDossier);
-
-        // 2026-09-18 (demande de Jeremy) : copie de QCM complète de ce
-        // stagiaire — archivée sur Drive pour chaque stagiaire, mais
-        // PAS jointe à l'email (2026-09-22, bug remonté par Jeremy : avec
-        // plusieurs stagiaires, la somme des copies de QCM — documents
-        // longs, question par question — fait dépasser le budget CPU de
-        // la fonction d'envoi de mail côté serveur ; celle-ci plante alors
-        // sans réponse exploitable, d'où l'absence de message de réussite
-        // OU d'erreur, et aucun mail envoyé. Les copies restent disponibles
-        // sur le Drive de la session, seulement plus en pièce jointe mail.)
-        const copie = await genererCopieQcmPdf(id, { sauvegarder: false });
-        if (copie?.doc) {
-          await sauvegarderDocumentDrive(s.id, copie.nomFichier, copie.doc, nomDossier);
-        }
-      } catch (e) {
-        DEBUG.erreur('envoyerSecretariat — génération PDF', e.message);
-        echecs.push(id);
-      }
-    }
-    if (!piecesJointes.length) {
-      journaliserResultatEnvoiSecretariat(s.id, false, 'Aucun document généré — envoi annulé');
-      return toast('Aucun document généré — envoi annulé (voir le journal de debug)', 'erreur');
-    }
-
-    // 2026-09-18 (demande de Jeremy) : récapitulatif de session (1 page,
-    // titres validés/non validés + recommandations) joint une seule fois,
-    // pour l'ensemble des stagiaires de la session — pas par stagiaire.
+    // 2026-10-02 (migration serveur, demande de Jeremy) : tout le travail
+    // (génération des PDF, sauvegarde Drive, envoi du mail, journalisation)
+    // est désormais fait par la fonction habelec-envoyer-secretariat, qui
+    // tourne jusqu'au bout même si ce navigateur est fermé ou perd la
+    // connexion en cours de route (EdgeRuntime.waitUntil côté serveur).
+    // L'ancien circuit 100% navigateur (PDF + Drive + envoyer-mail ici même)
+    // est conservé plus bas en commentaire pour référence / secours, mais
+    // n'est plus utilisé par ce bouton.
     try {
-      const recap = await genererRecapSessionPdf({ sauvegarder: false });
-      if (recap?.doc) {
-        piecesJointes.push({ nom: recap.nomFichier, base64: recap.doc.output('datauristring').split(',')[1] });
-        await sauvegarderDocumentDrive(s.id, recap.nomFichier, recap.doc, nomDossier);
-      }
-    } catch (e) {
-      DEBUG.erreur('envoyerSecretariat — récapitulatif de session', e.message);
-    }
-
-    const nomsInclus = eligibles.filter(st => idsChoisis.includes(st.id) && !echecs.includes(st.id))
-      .map(st => `${st.nom} ${st.prenom}`);
-    const sujet = `Habilitation électrique — ${s.numero_session_galaxy || '—'}`;
-    const texte = `Bonjour,\n\nCi-joint l'avis d'habilitation et la preuve d'examen pour :\n`
-      + nomsInclus.map(n => `  - ${n}`).join('\n')
-      + `\n\nSession : ${s.intitule || ''} (n° Galaxy ${s.numero_session_galaxy || '—'})`
-      + `\n\nLe récapitulatif de session (titres validés/non validés et recommandations) est également joint.`
-      + `\n\nLes copies de QCM de chaque stagiaire sont disponibles sur le Drive de la session `
-      + '(non jointes ici pour ne pas surcharger le mail).'
-      + (echecs.length ? `\n\n${echecs.length} stagiaire(s) n'a/ont pas pu être inclus (erreur de génération).` : '')
-      + '\n\n— Message généré automatiquement par Habelec.';
-
-    // 2026-09-22 : garde-fou taille — même sans QCM en pièce jointe, avis +
-    // preuve + récap de plusieurs stagiaires pourraient encore être trop
-    // volumineux pour la fonction d'envoi (limite ~20 Mo côté serveur,
-    // et surtout budget CPU limité). On avertit clairement plutôt que de
-    // laisser la fonction planter sans réponse exploitable.
-    const tailleEstimee = piecesJointes.reduce((s, p) => s + (p.base64?.length || 0), 0);
-    if (tailleEstimee > 15 * 1024 * 1024) {
-      journaliserResultatEnvoiSecretariat(s.id, false,
-        `Pièces jointes trop volumineuses (${Math.round(tailleEstimee / 1024 / 1024)} Mo)`);
-      return toast("Trop de documents pour un seul envoi (pièces jointes trop volumineuses) — "
-        + 'décoche une partie des stagiaires et envoie en plusieurs fois.', 'erreur', 9000);
-    }
-
-    // 2026-09-22 (bug remonté par Jeremy — aucun message, ni succès ni erreur,
-    // et aucun mail reçu) : filet de sécurité en plus du try/catch normal —
-    // si l'appel ne se règle jamais (fonction serveur plantée en plein
-    // traitement, sans réponse HTTP propre), on force malgré tout un message
-    // d'erreur au bout de 25 s plutôt que de laisser l'utilisateur sans
-    // aucun retour.
-    let etabli = false;
-    const delaiSecours = setTimeout(() => {
-      if (!etabli) {
-        etabli = true;
-        toast("L'envoi au secrétariat ne répond pas (délai dépassé) — réessaie avec moins de "
-          + 'stagiaires à la fois, ou contacte le support.', 'erreur', 9000);
-        enregistrerStatutEnvoiSecretariat(s.id, 'echec', 'Délai dépassé (pas de réponse du serveur)');
-        journaliserResultatEnvoiSecretariat(s.id, false, 'Délai dépassé (pas de réponse du serveur)');
-      }
-    }, 25000);
-
-    try {
-      const { data, error } = await sb.functions.invoke('envoyer-mail', {
-        body: { a: emailSecretariat, sujet, texte, pieces_jointes: piecesJointes },
+      const { data, error } = await sb.functions.invoke('habelec-envoyer-secretariat', {
+        body: { session_id: s.id, stagiaire_ids: idsChoisis },
       });
-      if (etabli) return;
-      etabli = true;
-      clearTimeout(delaiSecours);
       if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      toast(`Envoyé au secrétariat (${piecesJointes.length} fichier(s))`);
-      // 2026-09-23 (demande de Jeremy) : la pastille du tableau de bord des
-      // sessions ne se met à jour qu'ICI, une fois la réussite CONFIRMÉE
-      // par la réponse du serveur — jamais au simple clic du bouton.
-      enregistrerStatutEnvoiSecretariat(s.id, 'ok', null);
-      journaliserResultatEnvoiSecretariat(s.id, true,
-        `${piecesJointes.length} fichier(s) — ${nomsInclus.join(', ')}`);
+      if (data?.ok === false) throw new Error(data.error || 'échec inconnu');
+      toast(`Envoyé au secrétariat (${data?.nb_fichiers ?? ''} fichier(s))`.trim());
+      // Le statut (pastille du tableau de bord) et le journal des
+      // interventions sont déjà mis à jour par la fonction serveur elle-même.
     } catch (e) {
-      if (etabli) return;
-      etabli = true;
-      clearTimeout(delaiSecours);
       erreurSupabase('Envoi au secrétariat', e);
-      enregistrerStatutEnvoiSecretariat(s.id, 'echec', e?.message || String(e));
-      journaliserResultatEnvoiSecretariat(s.id, false, e?.message || String(e));
     }
   });
 }
