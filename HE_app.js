@@ -548,7 +548,7 @@ function ligneStagiaire(st, suivi, resultatsSymboles) {
     <td>${theorie}</td><td>${prat}</td>
     <td class="actions">
       <button class="icone" title="Plus d'actions (modifier, avis, documents, suppression...)"
-        onclick="ouvrirActionsStagiaire('${st.id}', '${esc(st.nom)}', '${esc(st.prenom)}', ${st.evaluation_externe ? 'true' : 'false'})">👁</button>
+        onclick="ouvrirActionsStagiaire('${st.id}', '${escJs(st.nom)}', '${escJs(st.prenom)}', ${st.evaluation_externe ? 'true' : 'false'})">👁</button>
       <button class="icone" title="Évaluation pratique" onclick="ouvrirPratique('${st.id}')">🔧</button>
       <button class="icone" title="QCM de rattrapage : uniquement sur le(s) titre(s) en échec au premier passage"
         onclick="proposerRattrapage('${st.id}')">🔁</button>
@@ -570,7 +570,7 @@ function ouvrirActionsStagiaire(id, nom, prenom, evaluationExterne) {
       <button onclick="fermerModale();genererTitrePdf('${id}')">🏅 Générer le titre d'habilitation (PDF)</button>
       <button onclick="fermerModale();genererPreuveExamenPdf('${id}')">🧾 Télécharger la preuve d'examen (PDF)</button>
       <button onclick="fermerModale();saisirResultatExterne('${id}')">📋 Saisir un résultat de formateur externe${evaluationExterne ? ' ✓' : ''}</button>
-      <button onclick="fermerModale();voirPositionnements('${id}', '${esc(nom)}', '${esc(prenom)}')">📊 Positionnement (entraînement libre)</button>
+      <button onclick="fermerModale();voirPositionnements('${id}', '${escJs(nom)}', '${escJs(prenom)}')">📊 Positionnement (entraînement libre)</button>
       <button class="danger" onclick="fermerModale();supprimerStagiaire('${id}')">🗑 Supprimer le stagiaire</button>
     </div>`);
 }
@@ -1105,8 +1105,20 @@ async function genererTousLesQcm() {
 // une fois le ZIP terminé (chaque PDF y est déjà régénéré et attendu — rien
 // à changer de ce côté, voir envoyerSecretariat()).
 async function exporterSessionComplet() {
-  await telechargerZipTitres();
+  const s = S.session;
+  journaliserActionSession(s.id, 'export_demande', {});
+  const resultatZip = await telechargerZipTitres();
+  journaliserActionSession(s.id, resultatZip?.ok ? 'export_zip_reussi' : 'export_zip_echec',
+    { detail: resultatZip?.detail || '' });
   await envoyerSecretariat();
+}
+
+// Journalise une étape du bouton Export / Envoi secrétariat dans le Journal
+// des interventions de la session (voir voirJournalSession) — best-effort,
+// ne doit jamais faire planter l'action elle-même en cas de souci réseau.
+function journaliserActionSession(sessionId, action, details) {
+  rpc('journaliser_envoi_secretariat', { p_session_id: sessionId, p_action: action, p_details: details })
+    .catch(e => DEBUG.erreur('Journal — ' + action, e.message));
 }
 
 async function telechargerZipTitres() {
@@ -1114,7 +1126,10 @@ async function telechargerZipTitres() {
   const { data: stagiaires } = await sb.from('stagiaires')
     .select('id, nom, prenom').eq('session_id', s.id).order('nom');
   const ids = (stagiaires || []).map(st => st.id);
-  if (!ids.length) return toast('Aucun stagiaire dans cette session', 'erreur');
+  if (!ids.length) {
+    toast('Aucun stagiaire dans cette session', 'erreur');
+    return { ok: false, detail: 'Aucun stagiaire dans cette session' };
+  }
 
   // Éligible = théorie initiale corrigée (même convention que voirCopie /
   // suivi de session — statut 'corrigee' ou 'terminee') — qu'un titre existe
@@ -1135,11 +1150,15 @@ async function telechargerZipTitres() {
   (stagiairesExternes || []).forEach(st => idsTheorieCorrigee.add(st.id));
   const eligibles = stagiaires.filter(st => idsTheorieCorrigee.has(st.id));
   if (!eligibles.length) {
-    return toast("Aucun stagiaire n'a de théorie corrigée pour l'instant — corrige les copies (👁) "
+    toast("Aucun stagiaire n'a de théorie corrigée pour l'instant — corrige les copies (👁) "
       + 'avant de télécharger le ZIP.', 'erreur', 7000);
+    return { ok: false, detail: "Aucun stagiaire n'a de théorie corrigée" };
   }
 
-  if (typeof JSZip === 'undefined') return toast('Bibliothèque ZIP indisponible (réseau ?)', 'erreur');
+  if (typeof JSZip === 'undefined') {
+    toast('Bibliothèque ZIP indisponible (réseau ?)', 'erreur');
+    return { ok: false, detail: 'Bibliothèque ZIP indisponible (réseau ?)' };
+  }
 
   toast(`Préparation du ZIP pour ${eligibles.length} stagiaire(s)…`);
   const zip = new JSZip();
@@ -1171,7 +1190,8 @@ async function telechargerZipTitres() {
   }
 
   if (!zip.files || !Object.keys(zip.files).length) {
-    return toast('Aucun document généré — voir le journal de debug', 'erreur');
+    toast('Aucun document généré — voir le journal de debug', 'erreur');
+    return { ok: false, detail: 'Aucun document généré' };
   }
 
   const contenu = await zip.generateAsync({ type: 'blob' });
@@ -1183,11 +1203,13 @@ async function telechargerZipTitres() {
 
   const genereCount = eligibles.length - echecs.length;
   if (echecs.length) {
-    toast(`ZIP généré pour ${genereCount} stagiaire(s). ${echecs.length} ignoré(s) : `
-      + echecs.map(({ st, raison }) => `${st.nom} ${st.prenom} (${raison})`).join(' ; '), 'erreur', 10000);
-  } else {
-    toast(`ZIP généré pour ${genereCount} stagiaire(s)`);
+    const detail = `${genereCount} stagiaire(s), ${echecs.length} ignoré(s) : `
+      + echecs.map(({ st, raison }) => `${st.nom} ${st.prenom} (${raison})`).join(' ; ');
+    toast(`ZIP généré pour ${detail}`, 'erreur', 10000);
+    return { ok: true, detail };
   }
+  toast(`ZIP généré pour ${genereCount} stagiaire(s)`);
+  return { ok: true, detail: `${genereCount} stagiaire(s)` };
 }
 
 // 2026-09-10 (demande de Jeremy) : bouton de test de la sauvegarde Drive,
@@ -1651,6 +1673,9 @@ async function voirJournalSession(sessionId) {
     envoi_secretariat_demande: '✉️ Envoi secrétariat demandé',
     envoi_secretariat_reussi: '✅ Envoi secrétariat réussi',
     envoi_secretariat_echec: '❌ Envoi secrétariat échoué',
+    export_demande: '📤 Export demandé (ZIP + envoi secrétariat)',
+    export_zip_reussi: '✅ ZIP généré',
+    export_zip_echec: '❌ Échec de génération du ZIP',
   };
 
   ouvrirModale('Journal des interventions', `
@@ -1681,9 +1706,11 @@ function detailJournal(l) {
   if (l.action === 'envoi_secretariat_demande') {
     return `${esc(d.nb_stagiaires)} stagiaire(s) sélectionné(s)`;
   }
-  if (l.action === 'envoi_secretariat_reussi' || l.action === 'envoi_secretariat_echec') {
+  if (l.action === 'envoi_secretariat_reussi' || l.action === 'envoi_secretariat_echec'
+    || l.action === 'export_zip_reussi' || l.action === 'export_zip_echec') {
     return esc(d.detail || '');
   }
+  if (l.action === 'export_demande') return '';
   return esc(JSON.stringify(d));
 }
 

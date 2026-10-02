@@ -58,6 +58,20 @@ function esc(v) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/* Comme esc(), mais pour une valeur placée entre apostrophes DANS le code
+   JavaScript d'un attribut onclick="..." (ex: onclick="maFonction('${escJs(x)}')").
+   esc() ne suffit pas ici : le navigateur redécode &#39; en ' avant que le
+   JavaScript ne soit lu, donc un nom contenant une apostrophe (ex. noms
+   bretons comme "PENNANEAC'H") casse la syntaxe du bouton. On échappe donc
+   l'apostrophe et l'antislash pour le JavaScript (\' et \\), puis seulement
+   les caractères restants dangereux pour l'attribut HTML (" < > &). */
+function escJs(v) {
+  if (v === null || v === undefined) return '';
+  const pourJs = String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  return pourJs.replace(/[&<>"]/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
 function toast(message, type = 'ok', duree = 4000) {
   const d = document.createElement('div');
   d.className = 'toast ' + type;
