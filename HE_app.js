@@ -373,7 +373,7 @@ async function rendreDetailSession(zone) {
         <button title="Télécharge un ZIP avec l'avis d'habilitation + la preuve d'examen de chaque stagiaire ayant un titre"
           onclick="telechargerZipTitres()">🗜 Télécharger ZIP</button>
         -->
-        <button title="Télécharge le ZIP (avis + preuve d'examen de chaque stagiaire ayant un titre), PUIS ouvre l'envoi au secrétariat"
+        <button title="Ouvre une boîte de dialogue pour choisir : télécharger le ZIP, envoyer au secrétariat (avec sauvegarde Drive automatique), ou les deux"
           onclick="exporterSessionComplet()">📤 Export</button>
         ${S.organisme?.drive_bouton_test_actif ? `<button title="Envoie un petit fichier de test dans le dossier Drive de cette session, sans envoyer aucun mail — pour vérifier la configuration Google Drive"
           onclick="testerSauvegardeDrive()">☁️ Tester Drive</button>` : ''}
@@ -1104,13 +1104,47 @@ async function genererTousLesQcm() {
 // généré et téléchargé d'abord, puis la modale d'envoi secrétariat s'ouvre
 // une fois le ZIP terminé (chaque PDF y est déjà régénéré et attendu — rien
 // à changer de ce côté, voir envoyerSecretariat()).
-async function exporterSessionComplet() {
-  const s = S.session;
-  journaliserActionSession(s.id, 'export_demande', {});
-  const resultatZip = await telechargerZipTitres();
-  journaliserActionSession(s.id, resultatZip?.ok ? 'export_zip_reussi' : 'export_zip_echec',
-    { detail: resultatZip?.detail || '' });
-  await envoyerSecretariat();
+// 2026-10-05 (demande de Jeremy) : le bouton Export ouvre d'abord une boîte de
+// dialogue à 2 cases (Télécharger le ZIP / Envoyer au secrétariat), cochées par
+// défaut, pour choisir l'une, l'autre ou les deux. La sauvegarde sur Google
+// Drive n'a PAS de case à part : elle se fait automatiquement avec l'envoi au
+// secrétariat (fonction serveur habelec-envoyer-secretariat) — le ZIP seul,
+// lui, ne touche pas au Drive.
+function exporterSessionComplet() {
+  ouvrirModale('Export de la session', `
+    <form id="form-export-session" class="formulaire">
+      <fieldset><legend>Que veux-tu faire ?</legend>
+        <label class="case"><input type="checkbox" name="export_zip" checked>
+          🗜 Télécharger le ZIP (avis d'habilitation + preuve d'examen de chaque stagiaire)</label>
+        <label class="case"><input type="checkbox" name="export_secretariat" checked>
+          ✉️ Envoyer au secrétariat</label>
+      </fieldset>
+      <p class="aide">La sauvegarde sur Google Drive se fait automatiquement avec l'envoi au
+        secrétariat (avis, preuves, copies de QCM et récapitulatif de la session).</p>
+      <div class="pied-modale">
+        <button type="button" onclick="fermerModale()">Annuler</button>
+        <button type="submit" class="principal">Lancer</button>
+      </div>
+    </form>`);
+
+  $('#form-export-session').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const faireZip = $('#form-export-session input[name=export_zip]').checked;
+    const faireEnvoi = $('#form-export-session input[name=export_secretariat]').checked;
+    if (!faireZip && !faireEnvoi) return toast('Coche au moins une action', 'erreur');
+
+    fermerModale();
+    const s = S.session;
+    journaliserActionSession(s.id, 'export_demande', { zip: faireZip, secretariat: faireEnvoi });
+    if (faireZip) {
+      const resultatZip = await telechargerZipTitres();
+      journaliserActionSession(s.id, resultatZip?.ok ? 'export_zip_reussi' : 'export_zip_echec',
+        { detail: resultatZip?.detail || '' });
+    }
+    // La modale de choix des stagiaires de l'envoi secrétariat s'ouvre ensuite
+    // (après la fin du ZIP si les deux sont cochés).
+    if (faireEnvoi) await envoyerSecretariat();
+  });
 }
 
 // Journalise une étape du bouton Export / Envoi secrétariat dans le Journal
@@ -1564,7 +1598,7 @@ async function voirJournalSession(sessionId) {
     envoi_secretariat_demande: '✉️ Envoi secrétariat demandé',
     envoi_secretariat_reussi: '✅ Envoi secrétariat réussi',
     envoi_secretariat_echec: '❌ Envoi secrétariat échoué',
-    export_demande: '📤 Export demandé (ZIP + envoi secrétariat)',
+    export_demande: '📤 Export demandé',
     export_zip_reussi: '✅ ZIP généré',
     export_zip_echec: '❌ Échec de génération du ZIP',
   };
@@ -1601,7 +1635,11 @@ function detailJournal(l) {
     || l.action === 'export_zip_reussi' || l.action === 'export_zip_echec') {
     return esc(d.detail || '');
   }
-  if (l.action === 'export_demande') return '';
+  if (l.action === 'export_demande') {
+    // Anciennes lignes (avant le 2026-10-05) : pas de détail, c'était toujours ZIP + envoi.
+    if (d.zip === undefined && d.secretariat === undefined) return 'ZIP + envoi secrétariat';
+    return [d.zip ? 'ZIP' : '', d.secretariat ? 'envoi secrétariat' : ''].filter(Boolean).join(' + ');
+  }
   return esc(JSON.stringify(d));
 }
 
