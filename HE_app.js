@@ -1206,7 +1206,10 @@ async function telechargerZipTitres() {
       zip.file(preuve.nomFichier, preuve.doc.output('arraybuffer'));
       // 2026-09-18 (demande de Jeremy) : copie de QCM complète de ce
       // stagiaire incluse elle aussi, pour archivage secrétariat.
-      const copie = await genererCopieQcmPdf(st.id, { sauvegarder: false });
+      // 2026-10-08 : construireDoc… (et non genererCopieQcmPdf) — un stagiaire évalué en
+      // externe n'a pas de sujet QCM : on saute sa copie en silence, sans le toast rouge
+      // « Aucun sujet généré » (le ZIP contient bien son avis et sa preuve d'examen).
+      const copie = await construireDocCopieQcmPdf(st.id);
       if (copie?.doc) zip.file(copie.nomFichier, copie.doc.output('arraybuffer'));
     } catch (e) {
       DEBUG.erreur('telechargerZipTitres — génération PDF', e.message);
