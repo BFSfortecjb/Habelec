@@ -1407,13 +1407,14 @@ async function editerStagiaire(id) {
       <p class="aide">Utilisée sur l'avis et le titre d'habilitation (volet « L'EMPLOYEUR »). Peut
         aussi être saisie par le stagiaire lui-même à la connexion au QCM (dans ce cas elle écrase
         cette valeur) — et est purgée à la clôture de la session.</p>
+      ${S.organisme?.date_naissance_sur_avis ? `
       <label>Date de naissance
         <input name="date_naissance" type="date" max="${dateNaissanceMax()}"
           value="${esc(st.date_naissance || '')}">
       </label>
-      <p class="aide">Normalement saisie par le stagiaire lui-même à la connexion au QCM — ce champ
-        permet de la corriger si besoin (ex. date du jour saisie par erreur). Elle est purgée à la
-        clôture de la session.</p>
+      <p class="aide">Imprimée sur l'avis d'habilitation (option d'organisme). Normalement saisie par
+        le stagiaire lui-même à la connexion au QCM — ce champ permet de la corriger si besoin (ex.
+        date du jour saisie par erreur). Elle est purgée à la clôture de la session.</p>` : ''}
       <fieldset><legend>Domaines de tension</legend>
         ${['TBT', 'BT', 'HTA', 'HTB'].map(d => `<label class="case">
           <input type="checkbox" name="domaine" value="${d}"
@@ -1452,10 +1453,12 @@ async function editerStagiaire(id) {
       fonction: f.fonction.value.trim(),
       affectation: f.affectation.value.trim(),
       entreprise: f.entreprise.value.trim(),
-      date_naissance: f.date_naissance.value || null,
       domaines: $$('#form-stagiaire input[name=domaine]:checked').map(i => i.value),
       recyclage: f.recyclage.checked,
     };
+    // 2026-10-08 : champ présent seulement si l'option d'organisme est cochée ; s'il est
+    // absent on ne touche pas à la valeur déjà enregistrée.
+    if (f.date_naissance) donnees.date_naissance = f.date_naissance.value || null;
     // 2026-09-18 (demande de Jeremy) : même sécurité que côté stagiaire —
     // évite qu'une correction manuelle réintroduise une date du jour.
     if (donnees.date_naissance && !dateNaissanceValide(donnees.date_naissance)) {
@@ -2860,6 +2863,15 @@ async function rendreOrganisme(zone) {
           elles ne seront plus exigées pour valider un titre, et le badge "Question fondamentale" ne
           s'affichera plus pendant la passation. S'applique à toutes les sessions.</p>
       </fieldset>
+      <fieldset><legend>Avis d'habilitation</legend>
+        <label class="case"><input type="checkbox" name="date_naissance_sur_avis" ${o.date_naissance_sur_avis ? 'checked' : ''}>
+          Afficher la date de naissance du stagiaire sur l'avis d'habilitation</label>
+        <p class="aide">Si coché : chaque stagiaire renseigne sa date de naissance à sa connexion au
+          QCM, et elle est imprimée sur l'avis d'habilitation (pas sur le titre ni la carte). Si
+          décoché : elle n'est ni demandée aux stagiaires ni imprimée. La date est de toute façon
+          supprimée à la clôture de la session. S'applique aux nouvelles connexions et aux PDF
+          générés ensuite.</p>
+      </fieldset>
       <fieldset><legend>Entraînement permanent (hors session, 2026-09-09)</legend>
         <p class="aide">Ce lien et ce QR code sont fixes : ils ne dépendent d'aucune session et
           fonctionnent en permanence. Le visiteur choisit ses titres visés et s'entraîne avec les
@@ -2964,6 +2976,7 @@ async function rendreOrganisme(zone) {
       drive_client_id: f.drive_client_id.value.trim() || null,
       drive_bouton_test_actif: f.drive_bouton_test_actif.checked,
       fondamentales_actives: f.fondamentales_actives.checked,
+      date_naissance_sur_avis: f.date_naissance_sur_avis.checked,
       entrainement_permanent_actif: f.entrainement_permanent_actif.checked,
       seuil_reussite_defaut: Math.max(1, Math.min(100, parseInt(f.seuil_reussite_defaut.value, 10) || 70)) / 100,
       email_secretariat: f.email_secretariat.value.trim() || null,

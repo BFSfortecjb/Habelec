@@ -346,6 +346,11 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
   y += 6;
   doc.text('Dates de la formation : ' + [dateFr(session?.date_debut), dateFr(session?.date_fin)]
     .filter(Boolean).join(' au '), marge, y);
+  // 2026-10-08 (demande de Jeremy) : date de naissance sur l'AVIS uniquement, si
+  // l'option d'organisme « date de naissance sur l'avis » est cochée.
+  if (org.date_naissance_sur_avis && st.date_naissance) {
+    doc.text('Date de naissance : ' + dateFr(st.date_naissance), marge + 105, y);
+  }
   y += 5;
 
   // Numéro de vérification d'authenticité (2026-08-26) : imprimé sur l'avis

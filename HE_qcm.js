@@ -22,7 +22,9 @@ const Q = {
   finLe: null,     // horodatage de fin si la session est chronométrée
   minuteur: null,
   candidats: [],   // liste renvoyée par liste_stagiaires_session, pour retrouver
-                    // date_naissance/entreprise sans un second aller-retour serveur
+                    // entreprise / besoin de date de naissance sans second aller-retour
+                    // (2026-10-08 : la date de naissance elle-même n'est plus renvoyée,
+                    // seulement date_naissance_requise / date_naissance_ok)
 };
 
 /* ---------- Cache local des réponses (2026-09-05) ---------------------
@@ -123,7 +125,10 @@ async function rechercherSessionStagiaire(code) {
  *  Si l'une manque, on les demande au stagiaire avant de continuer. */
 function demarrerQcm(jeton) {
   const candidat = Q.candidats.find(s => s.jeton === jeton);
-  if (candidat && (!candidat.date_naissance || !candidat.entreprise)) {
+  // 2026-10-08 (demande de Jeremy) : la date de naissance n'est demandée que si
+  // l'organisme a coché l'option « date de naissance sur l'avis d'habilitation ».
+  const besoinDateNaissance = !!(candidat && candidat.date_naissance_requise && !candidat.date_naissance_ok);
+  if (candidat && (besoinDateNaissance || !candidat.entreprise)) {
     return rendreFormulaireInfos($('#ecran'), jeton, candidat);
   }
   demarrerQcmSuite(jeton);
@@ -136,9 +141,9 @@ function rendreFormulaireInfos(cible, jeton, candidat) {
       <p class="sous-titre">Quelques informations sont nécessaires pour l'avis et
         la carte d'habilitation, avant de commencer le questionnaire.</p>
       <form id="form-infos" class="carte">
+        ${candidat.date_naissance_requise && !candidat.date_naissance_ok ? `
         <label>Date de naissance
-          <input name="date_naissance" type="date" required max="${dateNaissanceMax()}"
-                 value="${esc(candidat.date_naissance || '')}"></label>
+          <input name="date_naissance" type="date" required max="${dateNaissanceMax()}"></label>` : ''}
         <label>Entreprise
           <input name="entreprise" type="text" required autocomplete="off"
                  value="${esc(candidat.entreprise || '')}"></label>
@@ -152,17 +157,18 @@ function rendreFormulaireInfos(cible, jeton, candidat) {
     // date du jour au lieu de leur date de naissance (probablement la date
     // par défaut du sélecteur) — on bloque toute date donnant moins de 16
     // ans, pour éviter que l'erreur reparte se glisser dans le dossier.
-    if (!dateNaissanceValide(f.date_naissance.value)) {
+    const dateSaisie = f.date_naissance ? f.date_naissance.value : null;
+    if (dateSaisie && !dateNaissanceValide(dateSaisie)) {
       return toast('Cette date de naissance donne moins de 16 ans — vérifie qu\'il ne s\'agit pas de la '
         + 'date du jour par erreur.', 'erreur', 7000);
     }
     try {
       await rpc('completer_infos_stagiaire', {
         p_jeton: jeton,
-        p_date_naissance: f.date_naissance.value,
+        p_date_naissance: dateSaisie || null,
         p_entreprise: f.entreprise.value.trim(),
       });
-      candidat.date_naissance = f.date_naissance.value;
+      if (dateSaisie) candidat.date_naissance_ok = true;
       candidat.entreprise = f.entreprise.value.trim();
       demarrerQcmSuite(jeton);
     } catch (e) { erreurSupabase('Enregistrement des informations', e); }
