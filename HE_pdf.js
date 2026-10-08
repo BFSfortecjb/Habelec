@@ -444,8 +444,8 @@ async function genererTitrePdf(stagiaireId, { sauvegarder = true, silencieux = f
       // externe ne donne qu'un résultat global) plutôt que "—", qui laissait
       // croire que la théorie n'avait jamais été évaluée.
       const theorie = ev
-        ? (theorieOkExterne === true ? cellule('validée (externe)', BFS.vert)
-          : theorieOkExterne === false ? cellule('non validée (externe)', BFS.rouge)
+        ? (theorieOkExterne === true ? cellule('validée', BFS.vert)
+          : theorieOkExterne === false ? cellule('non validée', BFS.rouge)
           : '—')
         : d
         ? cellule(`${d.justes}/${d.total} (${d.taux} %)`, d.ok ? BFS.vert : BFS.rouge)
