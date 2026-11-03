@@ -515,3 +515,26 @@ details h4 { margin-top: 14px; font-size: 13px; color: var(--gris-doux); }
   color: var(--rouge);
   border-color: var(--rouge);
 }
+
+/* 2026-11-03 — QCM de positionnement : grille des titres BT | HT */
+.grille-titres { border: 1px solid var(--gris-clair, #dcdcd8); border-radius: 10px; overflow: hidden; margin-bottom: 14px; font-size: 14px; }
+.grille-titres .ent-titres, .grille-titres .ligne-titres { display: grid; grid-template-columns: 96px 1fr 1fr; }
+.grille-titres .ent-titres { background: #464645; color: #fff; font-weight: 700; text-align: center; }
+.grille-titres .ent-titres div { padding: 8px 4px; }
+.grille-titres .titre-groupe { background: #ecece8; font-weight: 700; padding: 6px 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; border-top: 1px solid #dcdcd8; }
+.grille-titres .ligne-titres { border-top: 1px solid #dcdcd8; }
+.grille-titres .role-titre { padding: 8px 8px; font-weight: 600; font-size: 12px; background: #fafaf8; display: flex; align-items: center; }
+.grille-titres .cel-titres { padding: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; border-left: 1px solid #dcdcd8; }
+.grille-titres .cel-titres.bt { background: #e8f0fa; }
+.grille-titres .cel-titres.ht { background: #fdf0d8; }
+.puce-titre { cursor: pointer; }
+.puce-titre input { position: absolute; opacity: 0; width: 0; height: 0; }
+.puce-titre span { display: inline-block; border: 1px solid #8a9296; background: #fff; border-radius: 16px; padding: 6px 12px; font-weight: 600; font-size: 13px; }
+.puce-titre input:checked + span { background: #f3ab12; border-color: #f3ab12; color: #080808; }
+.puce-titre input:focus-visible + span { outline: 2px solid #080808; outline-offset: 2px; }
+.vide-titre { color: #999; align-self: center; }
+.lien-session { text-align: center; margin: 12px 0 0; font-size: 14px; }
+.grille-noms .nom small { display: block; font-weight: 400; font-size: 12px; margin-top: 4px; color: #555; }
+.grille-noms .nom.nom-sans-titre { border-style: dashed; opacity: .75; }
+.grille-noms .nom.nom-sans-titre small { color: #b2181a; }
+@media (max-width: 520px) { .grille-titres .ent-titres, .grille-titres .ligne-titres { grid-template-columns: 74px 1fr 1fr; } }

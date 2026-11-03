@@ -1,5 +1,7 @@
 /* =====================================================================
    HE_entrainement.js — QCM de positionnement (entraînement libre)
+   2026-11-03 : parcours dissociés — QR permanent = grille de titres BT | HT ;
+   QR de session = choix du nom, QCM tiré sur les titres de la fiche.
    (2026-09-03, demande de Jeremy)
 
    Route #entrainement (à ne pas confondre avec #stagiaire, l'examen réel) :
@@ -64,15 +66,21 @@ async function ecranEntrainement(cible) {
   if (ENT.questions.length) return rendreQuestionEntrainement(cible);
   if (restaurerCacheEntrainement()) return rendreQuestionEntrainement(cible);
 
-  // 2026-09-04 (correctif) : la liste des titres ne peut pas venir de
-  // S.referentiel ici — ce visiteur n'a pas de compte, et les SELECT
-  // directs sur les tables de référence sont soumis aux policies RLS (qui
-  // n'autorisent pas le rôle anonyme). On passe par une fonction dédiée,
-  // sécurisée et strictement en lecture seule (liste_symboles_public).
+  // 2026-11-03 (demande de Jeremy) : deux parcours dissociés.
+  //  - avec un code de session (QR de la session) : on ne demande plus les
+  //    titres, le stagiaire touche son nom et le QCM est tiré sur les titres
+  //    déjà renseignés dans sa fiche (comme pour l'examen) ;
+  //  - sans code (QR permanent) : choix des titres, présentés en grille
+  //    BT | HT et classés par fonction.
+  if (ENT.code) return chargerStagiairesPositionnement(cible);
+
+  // 2026-09-04 (correctif) : pas de S.referentiel ici (visiteur sans compte,
+  // RLS) — fonction dédiée en lecture seule. 2026-11-03 : liste_symboles_grille
+  // ajoute domaine / ordre / fonction pour classer l'affichage.
   if (!ENT.symboles) {
     cible.innerHTML = '<div class="stagiaire-accueil"><p class="sous-titre">Chargement…</p></div>';
     try {
-      ENT.symboles = await rpc('liste_symboles_public');
+      ENT.symboles = await rpc('liste_symboles_grille');
     } catch (e) {
       ENT.symboles = [];
       erreurSupabase('Chargement des titres', e);
@@ -81,62 +89,115 @@ async function ecranEntrainement(cible) {
   rendreChoixTitresEntrainement(cible);
 }
 
+async function chargerStagiairesPositionnement(cible) {
+  cible.innerHTML = '<div class="stagiaire-accueil"><p class="sous-titre">Chargement…</p></div>';
+  try {
+    ENT.stagiaires = await rpc('liste_stagiaires_positionnement', { p_code: ENT.code });
+  } catch (e) {
+    ENT.code = null;
+    erreurSupabase('Chargement de la liste des stagiaires', e);
+    return ecranEntrainement(cible);
+  }
+  if (!ENT.stagiaires.length) {
+    toast('Code de session inconnu, ou session sans stagiaire', 'erreur');
+    ENT.code = null;
+    return ecranEntrainement(cible);
+  }
+  rendreChoixStagiaireEntrainement(cible);
+}
+
+// Libellé court pour la grille (la ligne indique déjà la fonction).
+function libelleCourtTitre(sy) {
+  return (sy.libelle || '').replace(/\s*\(chargé de chantier\)/i, '');
+}
+
+function rendreGrilleTitres(symboles) {
+  const groupes = [['non_electrique', 'Non électrique'], ['electrique', 'Électrique']];
+  return groupes.map(([ordre, titre]) => {
+    const du_groupe = symboles.filter(s => s.ordre === ordre);
+    if (!du_groupe.length) return '';
+    const roles = [];
+    du_groupe.forEach(s => { if (!roles.includes(s.role)) roles.push(s.role); });
+    const cellule = (role, dom) => {
+      const l = du_groupe.filter(s => s.role === role && s.domaine === dom);
+      return l.length
+        ? l.map(sy => `<label class="puce-titre"><input type="checkbox" name="symbole" value="${esc(sy.code)}"><span>${esc(libelleCourtTitre(sy))}</span></label>`).join('')
+        : '<span class="vide-titre">—</span>';
+    };
+    return `<div class="titre-groupe">${titre}</div>` + roles.map(role => `
+      <div class="ligne-titres"><div class="role-titre">${esc(role)}</div>
+        <div class="cel-titres bt">${cellule(role, 'BT')}</div>
+        <div class="cel-titres ht">${cellule(role, 'HT')}</div></div>`).join('');
+  }).join('');
+}
+
 function rendreChoixTitresEntrainement(cible) {
-  const symboles = (ENT.symboles || []).slice()
-    .sort((a, b) => (a.libelle || '').localeCompare(b.libelle || ''));
+  const symboles = ENT.symboles || [];
   cible.innerHTML = `
     <div class="stagiaire-accueil">
-      <h1>QCM de positionnement</h1>
+      <h1>QCM d'entraînement</h1>
       <p class="sous-titre">Entraînement libre — la bonne réponse s'affiche après chaque question.
         Ça ne compte pas pour ton évaluation officielle.</p>
       <form id="form-entrainement" class="carte">
-        <label>Code de la session <span class="aide">(facultatif — laisse vide pour un entraînement libre, hors de toute session)</span>
-          <input name="code" maxlength="10" autocapitalize="characters" autocomplete="off"
-                 value="${esc(ENT.code || '')}" class="saisie-code"></label>
-        <fieldset><legend>Titre(s) visé(s)</legend>
-          ${symboles.length
-            ? symboles.map(sy => `
-                <label class="case"><input type="checkbox" name="symbole" value="${esc(sy.code)}"> ${esc(sy.libelle)}</label>`).join('')
-            : '<p class="aide">Impossible de charger la liste des titres — vérifie ta connexion et recharge la page.</p>'}
-        </fieldset>
+        <p class="aide"><b>Titre(s) visé(s)</b> — touche pour choisir</p>
+        ${symboles.length
+          ? `<div class="grille-titres">
+               <div class="ent-titres"><div></div><div>BT</div><div>HT</div></div>
+               ${rendreGrilleTitres(symboles)}
+             </div>`
+          : '<p class="aide">Impossible de charger la liste des titres — vérifie ta connexion et recharge la page.</p>'}
         <button class="principal" type="submit">Continuer</button>
+        <p class="lien-session"><a href="#" id="lien-code-session">J'ai un code de session</a></p>
+        <div id="bloc-code-session" hidden>
+          <label>Code de la session
+            <input id="saisie-code-session" maxlength="10" autocapitalize="characters" autocomplete="off" class="saisie-code"></label>
+          <button type="button" class="principal" id="valider-code-session">Valider le code</button>
+        </div>
       </form>
     </div>`;
 
+  $('#lien-code-session').addEventListener('click', ev => {
+    ev.preventDefault();
+    $('#bloc-code-session').hidden = false;
+    $('#saisie-code-session').focus();
+  });
+  $('#valider-code-session').addEventListener('click', async () => {
+    const code = $('#saisie-code-session').value.trim().toUpperCase();
+    if (!code) return toast('Saisis le code de ta session', 'erreur');
+    ENT.code = code;
+    await chargerStagiairesPositionnement($('#ecran'));
+  });
+
   $('#form-entrainement').addEventListener('submit', async ev => {
     ev.preventDefault();
-    const f = ev.target;
     const symboles = $$('input[name="symbole"]:checked').map(i => i.value);
     if (!symboles.length) return toast('Choisis au moins un titre', 'erreur');
     ENT.symbolesChoisis = symboles;
-    ENT.code = f.code.value.trim().toUpperCase() || null;
+    ENT.code = null;
     ENT.jeton = null;
-    if (ENT.code) {
-      // Dans une session : on demande qui s'entraîne, pour pouvoir lier et
-      // conserver le résultat (le formateur pourra ensuite le consulter).
-      try {
-        ENT.stagiaires = await rpc('liste_stagiaires_session', { p_code: ENT.code });
-      } catch (e) {
-        return erreurSupabase('Chargement de la liste des stagiaires', e);
-      }
-      if (!ENT.stagiaires.length) return toast('Aucun stagiaire dans cette session', 'erreur');
-      return rendreChoixStagiaireEntrainement($('#ecran'));
-    }
     await lancerTirageEntrainement();
   });
 }
 
 function rendreChoixStagiaireEntrainement(cible) {
+  const libelles = {};
+  (ENT.symboles || []).forEach(s => { libelles[s.code] = s.libelle; });
   cible.innerHTML = `
     <div class="stagiaire-accueil">
-      <h1>Qui s'entraîne ?</h1>
-      <p class="sous-titre">Ton résultat sera visible par ton formateur, pour t'aider à progresser —
-        ça ne compte toujours pas pour ton évaluation officielle.</p>
+      <h1>Qui passe le positionnement ?</h1>
+      <p class="sous-titre">Touche ton nom. Ton résultat sera visible par ton formateur, pour t'aider à progresser —
+        ça ne compte pas pour ton évaluation officielle.</p>
       <div class="grille-noms">
-        ${ENT.stagiaires.map(s => `
-          <button class="nom${s.recyclage ? ' nom-recyclage' : ''}" title="${s.recyclage ? 'Recyclage' : 'Formation initiale'}"
-            onclick="choisirStagiaireEntrainement('${esc(s.jeton)}')">${esc(s.nom)} ${esc(s.prenom)}</button>`).join('')}
+        ${ENT.stagiaires.map(s => {
+          const titres = (s.symboles || []).map(c => esc(libelles[c] || c)).join(' · ');
+          const sans = !(s.symboles || []).length;
+          return `<button class="nom${s.recyclage ? ' nom-recyclage' : ''}${sans ? ' nom-sans-titre' : ''}"
+            title="${s.recyclage ? 'Recyclage' : 'Formation initiale'}" ${sans ? 'disabled' : ''}
+            onclick="choisirStagiaireEntrainement('${esc(s.jeton)}')">${esc(s.nom)} ${esc(s.prenom)}
+            <small>${sans ? 'Ton formateur doit d\'abord renseigner tes titres' : titres}</small></button>`;
+        }).join('')}
       </div>
+      <p class="lien-session"><a href="#entrainement" onclick="event.preventDefault();ENT.code=null;ENT.stagiaires=null;history.replaceState(null,'','#entrainement');ecranEntrainement($('#ecran'));">Entraînement libre sans session</a></p>
     </div>`;
 }
 
@@ -148,7 +209,10 @@ async function choisirStagiaireEntrainement(jeton) {
 async function lancerTirageEntrainement() {
   effacerCacheEntrainement();
   try {
-    const res = await rpc('tirage_positionnement', { p_code: ENT.code, p_symboles: ENT.symbolesChoisis });
+    const res = ENT.jeton
+      ? await rpc('tirage_positionnement_stagiaire', { p_jeton: ENT.jeton })
+      : await rpc('tirage_positionnement', { p_code: null, p_symboles: ENT.symbolesChoisis });
+    if (ENT.jeton) ENT.symbolesChoisis = res.symboles || [];
     ENT.questions = (res.questions || []).map(q => ({ ...q, choix: [], corrige: false }));
     ENT.session = res.session;
     ENT.index = 0;
