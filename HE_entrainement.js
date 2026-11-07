@@ -92,6 +92,8 @@ async function ecranEntrainement(cible) {
 async function chargerStagiairesPositionnement(cible) {
   cible.innerHTML = '<div class="stagiaire-accueil"><p class="sous-titre">Chargement…</p></div>';
   try {
+    // Libellés lisibles des titres (BE Manœuvre plutôt que BE_MANOEUVRE).
+    if (!ENT.symboles) ENT.symboles = await rpc('liste_symboles_grille').catch(() => null);
     ENT.stagiaires = await rpc('liste_stagiaires_positionnement', { p_code: ENT.code });
   } catch (e) {
     ENT.code = null;
@@ -118,6 +120,11 @@ function rendreGrilleTitres(symboles) {
     if (!du_groupe.length) return '';
     const roles = [];
     du_groupe.forEach(s => { if (!roles.includes(s.role)) roles.push(s.role); });
+    // Ordre d'affichage des fonctions (indépendant de la numérotation en base).
+    const ORDRE_ROLES = ['Exécutant', 'Chargé de chantier', 'Chargé de travaux',
+      "Chargé d'intervention BT", 'Chargé de consignation', "Chargé d'opérations"];
+    const rang = r => { const i = ORDRE_ROLES.indexOf(r); return i < 0 ? 99 : i; };
+    roles.sort((a, b) => rang(a) - rang(b));
     const cellule = (role, dom) => {
       const l = du_groupe.filter(s => s.role === role && s.domaine === dom);
       return l.length
