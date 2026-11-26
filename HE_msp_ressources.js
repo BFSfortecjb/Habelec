@@ -1,3 +1,4 @@
+// Réf. interne BFS-VL-8ffab3db — © 2026 Jérémy Bizeul / Vigie-lance, pour BFS Prévention.
 /* HE_msp_ressources.js — fiches MSP téléchargeables (PDF), embarquées en
    base64 comme LOGO_BFS dans HE_pdf.js. Ajoutées le 2026-08-27 (demande de
    Jeremy) : 4 MSP BF/HF remises à la charte BFS, une par thème, valables pour

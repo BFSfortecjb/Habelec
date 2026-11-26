@@ -1,3 +1,4 @@
+// Réf. interne BFS-VL-5e6d8cf9 — © 2026 Jérémy Bizeul / Vigie-lance, pour BFS Prévention.
 /* =====================================================================
    HE_core.js — socle de l'application
 

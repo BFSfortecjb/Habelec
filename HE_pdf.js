@@ -1,3 +1,4 @@
+// Réf. interne BFS-VL-c1f8cc5a — © 2026 Jérémy Bizeul / Vigie-lance, pour BFS Prévention.
 /* =====================================================================
    HE_pdf.js — documents générés
 
