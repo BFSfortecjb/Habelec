@@ -114,7 +114,7 @@ function libelleCourtTitre(sy) {
 }
 
 function rendreGrilleTitres(symboles) {
-  const groupes = [['non_electrique', 'Non électrique'], ['electrique', 'Électrique']];
+  const groupes = [['non_electrique', 'Non électrique'], ['bf_hf', 'BF / HF'], ['electrique', 'Électrique'], ['photovoltaique', 'Photovoltaïque']];
   return groupes.map(([ordre, titre]) => {
     const du_groupe = symboles.filter(s => s.ordre === ordre);
     if (!du_groupe.length) return '';
