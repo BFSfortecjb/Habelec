@@ -1,0 +1,219 @@
+/* =====================================================================
+   CA_app.js — coquille de l'espace formateur / testeur / admin
+   (même ergonomie qu'Habelec : en-tête, onglets, écrans listés par onglet)
+
+   Sommaire :
+     1. Connexion
+     2. Coquille (en-tête + onglets)
+   Les écrans de chaque onglet sont définis dans des fichiers dédiés
+   (CA_sessions.js, CA_banque.js, CA_pratique.js, CA_organisme.js, ...)
+   et déclarés dans RENDU ci-dessous.
+   ===================================================================== */
+
+/* ====================== 1. Connexion ================================ */
+function ecranConnexion(cible) {
+  cible.innerHTML = `
+    <div class="connexion">
+      ${logoImg('logo-grand')}
+      <h1>${esc(CONFIG.NOM_APPLICATION)}</h1>
+      <p class="sous-titre">Évaluation et suivi — CACES®</p>
+      ${S.accesRefuse ? `
+      <div class="carte refus">
+        <b>Accès refusé</b>
+        <p>Ce compte est bien authentifié, mais il n'est pas autorisé dans
+           BFS CACES. Chaque application BFS gère ses propres comptes :
+           demande à l'administrateur de t'ajouter.</p>
+      </div>` : ''}
+      <form id="form-connexion" class="carte">
+        <label>Adresse e-mail
+          <input type="email" name="email" required autocomplete="username">
+        </label>
+        <label>Mot de passe
+          <input type="password" name="mdp" required autocomplete="current-password">
+        </label>
+        <button class="principal" type="submit">Se connecter</button>
+        <p class="aide"><a href="#" id="mdp-oublie">Mot de passe oublié ?</a></p>
+        <p class="aide">Les stagiaires n'ont pas de compte : ils utilisent le
+           <a href="#stagiaire">lien de connexion stagiaire</a> et le code affiché en salle.</p>
+      </form>
+    </div>`;
+
+  $('#mdp-oublie').addEventListener('click', async ev => {
+    ev.preventDefault();
+    const email = ($('#form-connexion').email.value || '').trim() || (window.prompt('Adresse e-mail de ton compte :') || '').trim();
+    if (!email) return;
+    try {
+      const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+      if (error) throw error;
+    } catch (e) { DEBUG.erreur('Mot de passe oublié', e.message || e); }
+    // Même message dans tous les cas : on ne révèle pas si l'adresse existe.
+    toast('Si cette adresse correspond à un compte, un lien de réinitialisation vient d\'être envoyé (pense à regarder les courriers indésirables).', 'ok', 9000);
+  });
+
+  $('#form-connexion').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const f = ev.target;
+    try {
+      await connexion(f.email.value.trim(), f.mdp.value);
+      await chargerProfil();
+      await chargerReferentiel();
+      router();
+    } catch (e) { erreurSupabase('Connexion', e); }
+  });
+}
+
+/* ====================== 2. Coquille ================================= */
+const ONGLETS = {
+  sessions:     'Sessions',
+  statistiques: 'Statistiques',
+  banque:       'Banque de questions',
+  parc:         'Parc',
+  docqualite:   'Documents',
+  verification: 'Vérification',
+  organisme:    'Organisme',
+  moncompte:    'Mon espace',
+  qualite:      'Qualité',   // onglet direct pour l'auditeur seulement (les autres le trouvent sous Organisme)
+};
+// Libellés des écrans accessibles en sous-onglet
+const LIBELLE_ECRAN = { tableaubord: 'Tableau de bord', organisme: 'Réglages', testeurs: 'Testeurs & UT', qualite: 'Qualité', categories: 'Catégories', fise: 'Catalogue FISE',
+  grilles: 'Grilles pratiques', comptes: 'Comptes', motsdepasse: 'Mots de passe', moncompte: 'Mes paramètres', messtats: 'Mes statistiques', docqualite: 'Documents', faqcaces: 'FAQ CACES®' };
+// Sous-onglets de chaque groupe (onglet principal)
+const GROUPES_ONGLETS = {
+  organisme: ['tableaubord', 'organisme', 'testeurs', 'qualite', 'categories', 'fise', 'grilles', 'comptes', 'motsdepasse'],
+  moncompte: ['moncompte', 'messtats', 'grilles'],
+  docqualite: ['docqualite', 'faqcaces'],
+};
+const estAdmin = () => S.vision === 'admin';
+const estTesteurConnecte = () => !['secretariat', 'auditeur'].includes(S.profil?.role) && S.profil?.est_testeur !== false;
+
+/** Écrans (sous-onglets) visibles pour l'utilisateur dans un groupe. */
+function sousOnglets(groupe) {
+  const role = S.profil?.role;
+  return (GROUPES_ONGLETS[groupe] || []).filter(id => {
+    if (groupe === 'organisme') return estAdmin() || (role === 'secretariat' && id === 'motsdepasse');
+    if (id === 'messtats') return estTesteurConnecte();
+    if (id === 'grilles') return !estAdmin() && estTesteurConnecte();
+    return true;
+  });
+}
+/** Onglet principal qui porte un écran donné ('' si l'écran n'est pas dans un groupe). */
+function groupeDe(ecran) {
+  return Object.keys(GROUPES_ONGLETS).find(g => sousOnglets(g).includes(ecran)) || '';
+}
+
+const ONGLETS_AUDITEUR = new Set(['sessions', 'statistiques', 'qualite', 'docqualite', 'faqcaces', 'moncompte']);
+function ongletsVisibles() {
+  const role = S.profil?.role;
+  return Object.entries(ONGLETS).filter(([id]) => {
+    if (role === 'auditeur') return ONGLETS_AUDITEUR.has(id);
+    if (id === 'qualite') return false;
+    if (id === 'statistiques') return estAdmin() || role === 'secretariat';
+    if (id === 'verification') return estAdmin();
+    if (id === 'organisme') return sousOnglets('organisme').length > 0;
+    return true;
+  });
+}
+
+/** Écran provisoire : sert tant que l'écran définitif n'est pas livré. */
+function rendreAVenir(libelle) {
+  return zone => {
+    zone.innerHTML = `<div class="carte"><h2>${esc(libelle)}</h2>
+      <p class="aide">Cet écran est en cours de construction.</p></div>`;
+  };
+}
+
+// Chaque fichier d'écran peut surcharger son entrée en déclarant sa fonction ;
+// on résout à l'affichage (typeof) pour que l'ordre de chargement n'importe pas.
+const RENDU = {
+  sessions:     z => (typeof rendreSessions === 'function' ? rendreSessions : rendreAVenir('Sessions'))(z),
+  statistiques: z => (typeof rendreStatistiques === 'function' ? rendreStatistiques : rendreAVenir('Statistiques'))(z),
+  session:      z => (typeof rendreDetailSession === 'function' ? rendreDetailSession : rendreAVenir('Session'))(z),
+  banque:       z => (typeof rendreBanque === 'function' ? rendreBanque : rendreAVenir('Banque de questions'))(z),
+  grilles:      z => (typeof rendreGrilles === 'function' ? rendreGrilles : rendreAVenir('Grilles pratiques'))(z),
+  fise:         z => (typeof rendreCatalogueFise === 'function' ? rendreCatalogueFise : rendreAVenir('Catalogue FISE'))(z),
+  categories:   z => (typeof rendreCategories === 'function' ? rendreCategories : rendreAVenir('Catégories'))(z),
+  testeurs:     z => (typeof rendreTesteurs === 'function' ? rendreTesteurs : rendreAVenir('Testeurs & UT'))(z),
+  verification: z => (typeof rendreVerification === 'function' ? rendreVerification : rendreAVenir('Vérification'))(z),
+  faqcaces:     z => (typeof rendreFaq === 'function' ? rendreFaq : rendreAVenir('FAQ CACES®'))(z),
+  docqualite:   z => (typeof rendreEspaceDoc === 'function' ? rendreEspaceDoc : rendreAVenir('Documents'))(z),
+  qualite:      z => (typeof rendreQualite === 'function' ? rendreQualite : rendreAVenir('Qualité'))(z),
+  tableaubord:  z => (typeof rendreTableauBord === 'function' ? rendreTableauBord : rendreAVenir('Tableau de bord'))(z),
+  parc:         z => (typeof rendreParc === 'function' ? rendreParc : rendreAVenir('Parc'))(z),
+  organisme:    z => (typeof rendreOrganisme === 'function' ? rendreOrganisme : rendreAVenir('Organisme'))(z),
+  comptes:      z => (typeof rendreComptes === 'function' ? rendreComptes : rendreAVenir('Comptes'))(z),
+  motsdepasse:  z => (typeof rendreMotsDePasse === 'function' ? rendreMotsDePasse : rendreAVenir('Mots de passe'))(z),
+  messtats:     z => (typeof rendreMesStats === 'function' ? rendreMesStats : rendreAVenir('Mes statistiques'))(z),
+  moncompte:    z => (typeof rendreMonCompte === 'function' ? rendreMonCompte : rendreAVenir('Mon compte'))(z),
+};
+
+function ecranFormateur(cible) {
+  cible.innerHTML = `
+    <header class="entete">
+      <div class="titre">${logoImg('logo-entete')}${esc(CONFIG.NOM_APPLICATION)}
+        ${S.organisme?.raison_sociale ? `<span class="badge">${esc(S.organisme.raison_sociale)}</span>` : ''}</div>
+      <nav class="onglets">
+        ${ongletsVisibles().map(([id, lib]) =>
+          `<button data-onglet="${id}" class="${(S.ecran === id || groupeDe(S.ecran) === id) ? 'actif' : ''}">${esc(lib)}</button>`).join('')}
+      </nav>
+      <div class="compte">
+        <span>${esc(S.utilisateur.email)}</span>
+        <button class="lien" onclick="deconnexion()" title="Se déconnecter">Déconnexion</button>
+      </div>
+    </header>
+    ${(() => { const g = groupeDe(S.ecran), l = g ? sousOnglets(g) : [];
+      return l.length > 1 ? `<nav class="stat-onglets sous-onglets">${l.map(id => `<button data-sous="${id}" class="${S.ecran === id ? 'actif' : ''}">${esc(LIBELLE_ECRAN[id] || id)}</button>`).join('')}</nav>` : ''; })()}
+    <main id="contenu"></main>`;
+  $$('.sous-onglets button').forEach(b => b.addEventListener('click', () => { S.ecran = b.dataset.sous; S.session = null; ecranFormateur(cible); }));
+
+  $$('.onglets button').forEach(b => b.addEventListener('click', () => {
+    S.ecran = GROUPES_ONGLETS[b.dataset.onglet] ? sousOnglets(b.dataset.onglet)[0] : b.dataset.onglet; S.session = null; ecranFormateur(cible);
+  }));
+
+  (RENDU[S.ecran] || RENDU.sessions)($('#contenu'));
+}
+
+function retour(ecran) { S.ecran = ecran; ecranFormateur($('#ecran')); }
+
+/* ------------------------- modale générique ------------------------ */
+function ouvrirModale(titre, contenuHtml, opts = {}) {
+  fermerModale();
+  const d = document.createElement('div');
+  d.className = 'modale-fond';
+  d.id = 'modale';
+  d.innerHTML = `<div class="modale${opts.large ? ' modale-large' : ''}">
+    <div class="entete-modale"><h3>${esc(titre)}</h3>
+      <button class="icone" onclick="fermerModale()" title="Fermer">✕</button></div>
+    <div class="corps-modale">${contenuHtml}</div></div>`;
+  if (!opts.verrou) d.addEventListener('click', e => { if (e.target === d) fermerModale(); });
+  document.body.appendChild(d);
+}
+function fermerModale() { document.getElementById('modale')?.remove(); }
+
+
+/* ====================== 3. Nouveau mot de passe (lien « mot de passe oublié ») ====================== */
+function ecranNouveauMotDePasse(cible) {
+  cible.innerHTML = `
+    <div class="connexion">
+      ${logoImg('logo-grand')}
+      <h1>${esc(CONFIG.NOM_APPLICATION)}</h1>
+      <p class="sous-titre">Choisis ton nouveau mot de passe</p>
+      <form id="form-nouveau-mdp" class="carte">
+        <label>Nouveau mot de passe (8 caractères minimum)
+          <input type="password" name="m1" minlength="8" required autocomplete="new-password"></label>
+        <label>Confirmer
+          <input type="password" name="m2" minlength="8" required autocomplete="new-password"></label>
+        <button class="principal" type="submit">Enregistrer et continuer</button>
+      </form>
+    </div>`;
+  $('#form-nouveau-mdp').addEventListener('submit', async ev => {
+    ev.preventDefault(); const f = ev.target;
+    if (f.m1.value !== f.m2.value) return toast('Les deux mots de passe sont différents.', 'erreur');
+    const { error } = await sb.auth.updateUser({ password: f.m1.value });
+    if (error) return erreurSupabase('Nouveau mot de passe', error);
+    S.recuperationMdp = false;
+    toast('Mot de passe modifié.');
+    try { const etat = await chargerProfil(); if (etat === 'ok') await chargerReferentiel(); else if (etat === 'non_autorise') S.accesRefuse = true; }
+    catch (e) { erreurSupabase('Chargement', e); }
+    router();
+  });
+}
