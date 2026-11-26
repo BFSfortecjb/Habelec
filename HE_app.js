@@ -96,7 +96,26 @@ const RENDU = {
   'pratique-multiple': rendrePratiqueMultiple, // défini dans HE_pratique.js
 };
 
+/* Mémoire de navigation (2026-11-27, demande de Jeremy) : à l'actualisation de la page, on reste sur l'onglet / la session
+ * où l'on était. sessionStorage (propre à l'onglet du navigateur), clé préfixée, liée au compte connecté. */
+const NAV_CLE = 'habelec_navigation';
+function navLire() {
+  try { const m = JSON.parse(sessionStorage.getItem(NAV_CLE) || 'null'); return m && m.u === S.utilisateur?.id ? m : null; } catch { return null; }
+}
+function navEcrire() {
+  try { sessionStorage.setItem(NAV_CLE, JSON.stringify({ u: S.utilisateur?.id, ecran: S.ecran, session: S.session?.id || null })); } catch { /* ignoré */ }
+}
+
 function ecranFormateur(cible) {
+  let sessionARouvrir = null;
+  if (!S.navRestauree) {
+    S.navRestauree = true;
+    const m = navLire();
+    if (m) {
+      if (m.ecran && m.ecran !== 'session' && RENDU[m.ecran] && ongletsVisibles().some(([id]) => id === m.ecran)) S.ecran = m.ecran;
+      if (m.session) sessionARouvrir = m.session;
+    }
+  }
   cible.innerHTML = `
     <header class="entete">
       <div class="titre">${esc(CONFIG.NOM_APPLICATION)}
@@ -117,6 +136,10 @@ function ecranFormateur(cible) {
   }));
 
   (RENDU[S.ecran] || rendreSessions)($('#contenu'));
+  navEcrire();
+  // Actualisation sur le détail d'une session : on la rouvre (si elle existe encore)
+  if (sessionARouvrir) sb.from('sessions_formation').select('id').eq('id', sessionARouvrir).maybeSingle()
+    .then(({ data }) => { if (data) ouvrirSession(sessionARouvrir); });
 }
 
 function retour(ecran) { S.ecran = ecran; ecranFormateur($('#ecran')); }
