@@ -3013,30 +3013,47 @@ async function rendreOrganisme(zone) {
   });
 }
 
-/* Tableau des temps de formation par titre (2026-11-27) : heures initial / recyclage,
- * réglage d'organisme (table durees_formation). Sert à confirmer initial / recyclage
- * d'après les heures de présence Galaxy. Cases vides = non renseigné. */
+/* Temps de formation par formule (2026-11-27) : combinaison de titres + heures initial / recyclage
+ * (table formules_formation, réglage d'organisme). 1 journée = 7 h. Sert à confirmer
+ * initial / recyclage d'après les heures de présence Galaxy. */
 async function rendreDureesFormation(zone) {
-  const [{ data: titres, error: e1 }, { data: durees, error: e2 }] = await Promise.all([
-    sb.from('symboles').select('code, libelle, ordre_affichage').eq('actif', true).order('ordre_affichage'),
-    sb.from('durees_formation').select('symbole_code, heures_initial, heures_recyclage').eq('organisme_id', S.organisme.id)]);
+  const [{ data: titres, error: e1 }, { data: formules, error: e2 }] = await Promise.all([
+    sb.from('symboles').select('code, ordre_affichage').eq('actif', true).order('ordre_affichage'),
+    sb.from('formules_formation').select('*').eq('organisme_id', S.organisme.id).order('ordre')]);
   if (e1 || e2) { zone.innerHTML = '<p class="aide">Temps de formation indisponibles (patch du 27/11 non appliqué ?)</p>'; return; }
-  const par = new Map((durees || []).map(d => [d.symbole_code, d]));
-  const lignes = (titres || []).map(t => { const d = par.get(t.code) || {};
-    return `<tr data-code="${esc(t.code)}"><td><b>${esc(t.code)}</b> <span class="aide">${esc(t.libelle || '')}</span></td>
-      <td><input type="number" class="d-ini" min="0" step="0.25" value="${d.heures_initial ?? ''}" style="width:5.5em"></td>
-      <td><input type="number" class="d-rec" min="0" step="0.25" value="${d.heures_recyclage ?? ''}" style="width:5.5em"></td></tr>`; }).join('');
-  zone.innerHTML = `<details class="carte"><summary><b>Temps de formation par titre (heures)</b></summary>
-    <p class="aide">Durée de présence attendue en formation initiale et en recyclage. Laisse vide si non défini.</p>
-    <table class="tableau"><thead><tr><th>Titre</th><th>Initial (h)</th><th>Recyclage (h)</th></tr></thead><tbody>${lignes}</tbody></table>
-    <div class="barre-actions"><button type="button" id="btn-durees">Enregistrer les temps</button></div></details>`;
-  $('#btn-durees').onclick = async () => {
+  const codes = (titres || []).map(t => t.code);
+  const ligne = f => `<tr data-id="${esc(f.id || '')}"><td><input class="f-nom" value="${esc(f.nom || '')}" style="width:12em"></td>
+    <td><div class="f-titres" style="display:flex;flex-wrap:wrap;gap:.2em .7em;max-width:34em">${codes.map(c =>
+      `<label class="case" style="margin:0"><input type="checkbox" value="${esc(c)}" ${(f.symboles || []).includes(c) ? 'checked' : ''}> ${esc(c)}</label>`).join('')}</div></td>
+    <td><input type="number" class="f-ini" min="0" step="0.25" value="${f.heures_initial ?? ''}" style="width:5em"></td>
+    <td><input type="number" class="f-rec" min="0" step="0.25" value="${f.heures_recyclage ?? ''}" style="width:5em"></td>
+    <td><button type="button" class="f-suppr" title="Supprimer cette formule">✕</button></td></tr>`;
+  zone.innerHTML = `<details class="carte" open><summary><b>Temps de formation par formule (heures)</b></summary>
+    <p class="aide">Une formule = une combinaison de titres. 1 journée = 7 h. Laisse une durée vide si elle n'est pas définie.</p>
+    <table class="tableau"><thead><tr><th>Formule</th><th>Titres inclus</th><th>Initial (h)</th><th>Recyclage (h)</th><th></th></tr></thead>
+    <tbody>${(formules || []).map(ligne).join('')}</tbody></table>
+    <div class="barre-actions"><button type="button" id="btn-formule-ajout">+ Ajouter une formule</button>
+    <button type="button" id="btn-formules">Enregistrer les temps</button></div></details>`;
+  const tbody = zone.querySelector('tbody');
+  tbody.addEventListener('click', ev => { if (ev.target.classList.contains('f-suppr')) ev.target.closest('tr').remove(); });
+  $('#btn-formule-ajout').onclick = () => tbody.insertAdjacentHTML('beforeend', ligne({ nom: '', symboles: [] }));
+  $('#btn-formules').onclick = async () => {
     const num = v => (v === '' ? null : Math.max(0, Number(v)));
-    const rows = [...zone.querySelectorAll('tbody tr')].map(tr => ({ organisme_id: S.organisme.id, symbole_code: tr.dataset.code,
-      heures_initial: num(tr.querySelector('.d-ini').value), heures_recyclage: num(tr.querySelector('.d-rec').value), maj_le: new Date().toISOString() }));
-    const { error } = await sb.from('durees_formation').upsert(rows, { onConflict: 'organisme_id,symbole_code' });
-    if (error) return erreurSupabase('Enregistrement des temps', error);
+    const lignes = [...tbody.querySelectorAll('tr')].map((tr, k) => ({ id: tr.dataset.id || null, nom: tr.querySelector('.f-nom').value.trim(),
+      symboles: [...tr.querySelectorAll('.f-titres input:checked')].map(i => i.value),
+      heures_initial: num(tr.querySelector('.f-ini').value), heures_recyclage: num(tr.querySelector('.f-rec').value), ordre: k + 1 }));
+    if (lignes.some(l => !l.nom || !l.symboles.length)) return toast('Chaque formule doit avoir un nom et au moins un titre', 'erreur');
+    const gardes = lignes.filter(l => l.id).map(l => l.id);
+    const avant = (formules || []).map(f => f.id).filter(id => !gardes.includes(id));
+    if (avant.length) { const { error } = await sb.from('formules_formation').delete().in('id', avant); if (error) return erreurSupabase('Suppression', error); }
+    for (const l of lignes) {
+      const d = { organisme_id: S.organisme.id, nom: l.nom, symboles: l.symboles, heures_initial: l.heures_initial,
+        heures_recyclage: l.heures_recyclage, ordre: l.ordre, maj_le: new Date().toISOString() };
+      const { error } = l.id ? await sb.from('formules_formation').update(d).eq('id', l.id) : await sb.from('formules_formation').insert(d);
+      if (error) return erreurSupabase('Enregistrement des temps', error);
+    }
     toast('Temps de formation enregistrés');
+    rendreDureesFormation(zone);
   };
 }
 
