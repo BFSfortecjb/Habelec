@@ -219,6 +219,6 @@ async function chargerPresencesGalaxy(zone, s, stagiaires) {
       + `<td style="text-align:center"><b>${formatHeures(e.heures)}</b></td></tr>`;
   }).join('');
   zone.innerHTML = `<details class="carte" open><summary><b>Présences Galaxy — demi-journées suivies</b></summary>
-    <table class="tableau compact"><thead><tr><th>Stagiaire</th>${entete}<th>Total présent</th></tr></thead><tbody>${corps}</tbody></table>
+    <table class="tableau compact"><thead><tr><th>Stagiaire</th>${entete}<th style="text-align:center">Total présent</th></tr></thead><tbody>${corps}</tbody></table>
     <p class="aide">Lecture seule, d'après Galaxy (M = matin, A = après-midi). Le total additionne les durées prévues des jours où le stagiaire est présent.</p></details>`;
 }
