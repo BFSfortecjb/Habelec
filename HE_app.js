@@ -2829,6 +2829,7 @@ async function rendreOrganisme(zone) {
   const o = S.organisme || {};
   zone.innerHTML = `
     <div class="barre-actions"><h2>Organisme</h2></div>
+    <div id="zone-durees"></div>
     <form id="form-organisme" class="formulaire carte">
       <div class="grille-2">
         <label>Raison sociale — Sèvremont / Bocage <input name="raison_sociale" required value="${esc(o.raison_sociale)}"></label>
@@ -2955,6 +2956,7 @@ async function rendreOrganisme(zone) {
   activerSignature('signature-organisme');
   activerImage('cachet-organisme');
   activerImage('cachet-organisme-briec');
+  rendreDureesFormation($('#zone-durees'));
 
   // Lien fixe (aucun ?code= : voir tirage_positionnement, qui accepte
   // désormais un code vide) vers l'entraînement libre, hors de toute
@@ -3009,6 +3011,33 @@ async function rendreOrganisme(zone) {
     toast('Organisme enregistré');
     await chargerProfil();
   });
+}
+
+/* Tableau des temps de formation par titre (2026-11-27) : heures initial / recyclage,
+ * réglage d'organisme (table durees_formation). Sert à confirmer initial / recyclage
+ * d'après les heures de présence Galaxy. Cases vides = non renseigné. */
+async function rendreDureesFormation(zone) {
+  const [{ data: titres, error: e1 }, { data: durees, error: e2 }] = await Promise.all([
+    sb.from('symboles').select('code, libelle, ordre_affichage').eq('actif', true).order('ordre_affichage'),
+    sb.from('durees_formation').select('symbole_code, heures_initial, heures_recyclage').eq('organisme_id', S.organisme.id)]);
+  if (e1 || e2) { zone.innerHTML = '<p class="aide">Temps de formation indisponibles (patch du 27/11 non appliqué ?)</p>'; return; }
+  const par = new Map((durees || []).map(d => [d.symbole_code, d]));
+  const lignes = (titres || []).map(t => { const d = par.get(t.code) || {};
+    return `<tr data-code="${esc(t.code)}"><td><b>${esc(t.code)}</b> <span class="aide">${esc(t.libelle || '')}</span></td>
+      <td><input type="number" class="d-ini" min="0" step="0.25" value="${d.heures_initial ?? ''}" style="width:5.5em"></td>
+      <td><input type="number" class="d-rec" min="0" step="0.25" value="${d.heures_recyclage ?? ''}" style="width:5.5em"></td></tr>`; }).join('');
+  zone.innerHTML = `<details class="carte"><summary><b>Temps de formation par titre (heures)</b></summary>
+    <p class="aide">Durée de présence attendue en formation initiale et en recyclage. Laisse vide si non défini.</p>
+    <table class="tableau"><thead><tr><th>Titre</th><th>Initial (h)</th><th>Recyclage (h)</th></tr></thead><tbody>${lignes}</tbody></table>
+    <div class="barre-actions"><button type="button" id="btn-durees">Enregistrer les temps</button></div></details>`;
+  $('#btn-durees').onclick = async () => {
+    const num = v => (v === '' ? null : Math.max(0, Number(v)));
+    const rows = [...zone.querySelectorAll('tbody tr')].map(tr => ({ organisme_id: S.organisme.id, symbole_code: tr.dataset.code,
+      heures_initial: num(tr.querySelector('.d-ini').value), heures_recyclage: num(tr.querySelector('.d-rec').value), maj_le: new Date().toISOString() }));
+    const { error } = await sb.from('durees_formation').upsert(rows, { onConflict: 'organisme_id,symbole_code' });
+    if (error) return erreurSupabase('Enregistrement des temps', error);
+    toast('Temps de formation enregistrés');
+  };
 }
 
 /* ============ 8 ter. Onglet Mon compte (tout formateur) ===============

@@ -98,7 +98,7 @@ async function ouvrirImportGalaxy() {
     const plan = inscrits.map(i => {
       const titres = i.categories.map(c => ({ brut: c, m: codes.get(normCodeGalaxy(c)) || null }));
       const connus = titres.filter(t => t.m);
-      const rec = connus.length > 0 && connus.every(t => t.m.rec);
+      const rec = connus.some(t => t.m.rec);   // au moins un titre en recyclage => stagiaire en recyclage
       const lie = parGalaxyId.get(i.galaxy_id);
       if (lie) return { i, titres, rec, type: 'sync', st: lie };
       const cand = sansLien.filter(x => normNomGalaxy(x.nom) === normNomGalaxy(i.nom) && normNomGalaxy(x.prenom) === normNomGalaxy(i.prenom));
