@@ -176,8 +176,10 @@ async function nouvelleSession() {
   // 2026-11-27 (demande de Jeremy) : un seul formulaire à deux colonnes (comme CACES), au lieu
   // d'une suite de fenêtres de saisie. N° Galaxy obligatoire + « Récupérer depuis Galaxy » (lecture seule).
   const { data: formateurs } = await sb.from('formateurs').select('id, nom, prenom').eq('organisme_id', S.organisme.id).order('nom');
-  const optsFormateurs = (formateurs || []).map(f =>
-    `<option value="${esc(f.id)}" ${f.id === S.profil.id ? 'selected' : ''}>${esc(((f.prenom || '') + ' ' + (f.nom || '')).trim())}</option>`).join('');
+  // Pas de présélection : le compte connecté n'est pas forcément le formateur de la session
+  // (2026-11-27, retour de Jeremy « pas le bon formateur ») — choix obligatoire.
+  const optsFormateurs = '<option value="">— choisir le formateur —</option>' + (formateurs || []).map(f =>
+    `<option value="${esc(f.id)}">${esc(((f.prenom || '') + ' ' + (f.nom || '')).trim())}</option>`).join('');
   const auj = new Date().toISOString().slice(0, 10);
   ouvrirModale('Nouvelle session', `
     <form id="form-nouvelle-session" class="formulaire">
@@ -195,17 +197,11 @@ async function nouvelleSession() {
         <label>Date de début <input type="date" name="date_debut" required value="${auj}"></label>
         <label>Date de fin <span class="aide">(si la formation dure plusieurs jours)</span>
           <input type="date" name="date_fin"></label>
-        <label>Formateur de la session <select name="formateur_id">${optsFormateurs}</select></label>
+        <label>Formateur de la session <select name="formateur_id" required>${optsFormateurs}</select></label>
         <label>Lieu de la formation
           <select name="lieu"><option value="Briec">Briec — Bretagne Formation Sécurité</option>
             <option value="Sèvremont">Sèvremont — Bocage Formation Sécurité</option></select></label>
       </div>
-      <fieldset><legend>Titres d'habilitation visés <span class="aide">(proposés à chaque stagiaire, à préciser ensuite stagiaire par stagiaire)</span></legend>
-        ${[['non_electrique', 'Non électrique'], ['bf_hf', 'BF / HF'], ['electrique', 'Électrique'], ['photovoltaique', 'Photovoltaïque']].map(([ordre, titre]) => {
-          const l = (S.referentiel?.symboles || []).filter(sy => sy.ordre === ordre);
-          return l.length ? `<div class="groupe-symboles"><b>${titre}</b> ${l.map(sy => `<label class="case"><input type="checkbox" name="titre_vise" value="${esc(sy.code)}"> ${esc(sy.libelle)}</label>`).join('')}</div>` : '';
-        }).join('')}
-      </fieldset>
       <div class="pied-modale"><button type="button" onclick="fermerModale()">Annuler</button>
         <button type="submit" class="principal">Créer la session</button></div>
     </form>`);
@@ -222,17 +218,25 @@ async function nouvelleSession() {
       if (d1) f.date_debut.value = d1;
       f.date_fin.value = d2 && d2 !== d1 ? d2 : '';
       f.lieu.value = lieuDepuisGalaxy(g);
-      info.textContent = ' Trouvée : ' + (g.nom_produit || '');
+      // Formateur : liste_formateur de Galaxy (objets {nom, prenom, ...}) rapprochée des formateurs Habélec (sans accents ni casse)
+      const norm = x => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      const fg = (Array.isArray(g.liste_formateur) ? g.liste_formateur : []).filter(x => !x.role || x.role === 'formateur');
+      const uniques = [...new Map((formateurs || []).filter(fo => fg.some(x => norm(x.nom) === norm(fo.nom) && norm(x.prenom) === norm(fo.prenom)))
+        .map(fo => [norm(fo.prenom + ' ' + fo.nom), fo])).values()];
+      let msgForm = ' (aucun formateur renseigné dans Galaxy — à choisir)';
+      if (uniques.length === 1) { f.formateur_id.value = uniques[0].id; msgForm = ' — formateur : ' + uniques[0].prenom + ' ' + uniques[0].nom; }
+      else if (uniques.length > 1) msgForm = ' (plusieurs formateurs dans Galaxy — à choisir)';
+      else if (fg.length) msgForm = ' (formateur Galaxy « ' + fg.map(x => x.prenom + ' ' + x.nom).join(', ') + ' » non reconnu dans Habélec — à choisir)';
+      info.textContent = ' Trouvée : ' + (g.nom_produit || '') + msgForm;
     } catch (e) { info.textContent = ' Galaxy injoignable (' + e.message + ') — saisie manuelle.'; }
   };
   f.addEventListener('submit', async ev => {
     ev.preventDefault();
     const code = genererCodeAcces();
     const { error } = await sb.from('sessions_formation').insert({
-      organisme_id: S.organisme.id, formateur_id: f.formateur_id.value || S.profil.id,
+      organisme_id: S.organisme.id, formateur_id: f.formateur_id.value,
       intitule: f.intitule.value.trim(), entreprise: f.entreprise.value.trim() || null,
       numero_session_galaxy: f.numero_galaxy.value.trim(), code_acces: code, statut: 'brouillon', lieu: f.lieu.value,
-      titres_vises: [...f.querySelectorAll('[name=titre_vise]:checked')].map(i => i.value),
       date_debut: f.date_debut.value || auj, date_fin: f.date_fin.value && f.date_fin.value !== f.date_debut.value ? f.date_fin.value : null,
       // Seuil de réussite : réglage d'organisme (2026-09-09), voir onglet Organisme.
       seuil_global: S.organisme.seuil_reussite_defaut ?? 0.70,
@@ -1430,7 +1434,7 @@ async function enregistrerStatutEnvoiSecretariat(sessionId, statut, detail) {
 async function nouveauStagiaire() { await editerStagiaire(null); }
 
 async function editerStagiaire(id) {
-  let st = { nom: '', prenom: '', fonction: '', affectation: '', date_naissance: null, domaines: [], symboles: [...(S.session?.titres_vises || [])] };
+  let st = { nom: '', prenom: '', fonction: '', affectation: '', date_naissance: null, domaines: [], symboles: [] };
   if (id) {
     const { data } = await sb.from('stagiaires')
       .select('*, stagiaire_symboles(symbole_code)').eq('id', id).single();

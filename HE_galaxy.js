@@ -49,7 +49,7 @@ function lieuDepuisGalaxy(f) {
 async function formationGalaxy(numero) {
   const n = Number(String(numero).trim());
   if (!n) throw new Error('N° de session Galaxy invalide');
-  const rep = await galaxy('get_formations', { search: { formation_id: n } }, 1, 5);
+  const rep = await galaxy('get_formations', { search: { formation_id: n }, avec_liste_des_formateur: 1 }, 1, 5);
   return (rep.result || [])[0] || null;
 }
 
@@ -60,10 +60,20 @@ async function inscritsGalaxy(f) {
   const rep = await galaxy('get_sta_ins', { search: { produit_id: f.produit_id, date_debut: jour } }, 1, 400);
   const lignes = (rep.result || []).filter(x => String(x.salle_id || '') === String(f.salle_id || '')
     && String(x.annule) !== '1' && jourGalaxy(x.date_debut) === jour);
+  // Noms via les présences (la clé « BFS HABELEC » n'autorise pas get_stagiaires) : un appel pour toute la formation.
+  const noms = new Map();
+  try {
+    const pr = await galaxy('get_presence_stagiaire', { formation_id: f.formation_id }, 1, 400);
+    (pr.result || []).forEach(x => { if (x.stagiaire_id && !noms.has(String(x.stagiaire_id))) noms.set(String(x.stagiaire_id), { nom: x.nom, prenom: x.prenom }); });
+  } catch (_e) { /* présences facultatives */ }
+  let fichesOk = true;   // get_stagiaires non autorisé pour cette clé : on n'insiste pas après un échec
   const sortie = [];
   for (const l of lignes) {
-    let fiche = {};
-    try { fiche = ((await galaxy('get_stagiaires', { search: { id: l.stagiaire_id } }, 1, 5)).result || [])[0] || {}; } catch (_e) { /* fiche facultative */ }
+    let fiche = noms.get(String(l.stagiaire_id)) || {};
+    if (fichesOk) {
+      try { fiche = { ...fiche, ...(((await galaxy('get_stagiaires', { search: { id: l.stagiaire_id } }, 1, 5)).result || [])[0] || {}) }; }
+      catch (_e) { fichesOk = false; /* fiche facultative */ }
+    }
     sortie.push({
       galaxy_id: String(l.stagiaire_id), nom: (l.nom || fiche.nom || '').trim(), prenom: (l.prenom || fiche.prenom || '').trim(),
       email: (l.mail_pro || l.mail_perso || fiche.mail_pro || fiche.mail_perso || '').trim() || null,
@@ -130,8 +140,7 @@ async function ouvrirImportGalaxy() {
         for (const p of plan) {
           if (p.type === 'homonymes') continue;
           const nomG = p.i.nom.toUpperCase();
-          let titresOk = [...new Set(p.titres.filter(t => t.m).map(t => t.m.code))];
-          if (!titresOk.length) titresOk = [...(s.titres_vises || [])];   // à défaut de catégories Galaxy : titres visés de la session
+          const titresOk = [...new Set(p.titres.filter(t => t.m).map(t => t.m.code))];
           if (p.type === 'sync' || p.type === 'rattacher') {
             const maj = { galaxy_stagiaire_id: p.i.galaxy_id, galaxy_nom: nomG, galaxy_prenom: p.i.prenom };
             // le nom/prénom d'Habélec ne change que s'il n'avait pas été corrigé à la main
