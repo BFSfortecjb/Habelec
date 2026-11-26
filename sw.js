@@ -1,10 +1,9 @@
-/* BFS-VL-13a9fd26 */
 /* =====================================================================
    sw.js — service worker de l'app shell (2026-08)
 
    Rôle unique : permettre à l'application de se CHARGER sans réseau (ex.
    onglet rouvert en atelier sans connexion). Les données (Supabase) ne
-   passent PAS par ce service worker — c'est CA_offline.js qui gère leur
+   passent PAS par ce service worker — c'est HE_offline.js qui gère leur
    mise en cache et leur synchronisation, à un niveau applicatif. Ici on ne
    met en cache que les fichiers same-origin de l'appli elle-même (JS/CSS/
    HTML), jamais les requêtes vers Supabase ni vers les CDN externes (dont
@@ -12,7 +11,7 @@
 
    Règle commune Univers BFS : le dépôt est partagé entre plusieurs applis
    sur bfsfortecjb.github.io — CE fichier DOIT être enregistré avec
-   `scope: './'` (voir CA_config.js / index.html), jamais '/', sous peine de
+   `scope: './'` (voir HE_config.js / index.html), jamais '/', sous peine de
    prendre le contrôle des autres applis du portail.
 
    À faire à chaque déploiement qui change un fichier listé ci-dessous :
@@ -26,62 +25,22 @@
 // à servir indéfiniment les anciens fichiers en cache (voir la règle
 // ci-dessus), même après un rechargement forcé (Ctrl+F5 ne contourne PAS
 // le service worker).
-const CACHE_VERSION = 'caces-shell-v127';
+const CACHE_VERSION = 'habelec-shell-v39';
 
 const FICHIERS_APP_SHELL = [
   './',
   './index.html',
   './styles.css',
-  './CA_config.js',
-  './CA_debug.js',
-  './CA_core.js',
-  './CA_drive.js',
-  './CA_photo.js',
-  './CA_carton.js',
-  './assets/logo_bfs.png',
-  './assets/logo_assurance_maladie.jpg',
-  './CA_documents.js',
-  './CA_engins.js',
-  './CA_organisme.js',
-  './CA_fise.js',
-  './CA_horometre.js',
-  './CA_visite.js',
-  './CA_qcm_general.js',
-  './CA_sessions.js',
-  './CA_stagiaires.js',
-  './CA_theorie.js',
-  './CA_stagiaire.js',
-  './CA_comptes.js',
-  './CA_planning.js',
-  './CA_conseil_planning.js',
-  './CA_secretariat.js',
-  './CA_preuve.js',
-  './CA_recap.js',
-  './CA_statistiques.js',
-  './CA_conformite_cdt.js',
-  './CA_qualite.js',
-  './CA_espace_doc.js',
-  './CA_faq.js',
-  './CA_presences_galaxy.js',
-  './data/faq_caces.json',
-  './CA_espace_testeur.js',
-  './CA_tableau_bord.js',
-  './CA_dossier_audit.js',
-  './CA_export.js',
-  './CA_journal.js',
-  './CA_verification.js',
-  './CA_parcours.js',
-  './CA_adequation.js',
-  './CA_non_conformite.js',
-  './CA_tablette.js',
-  './CA_repartition.js',
-  './CA_galaxy.js',
-  './CA_galaxy_envoi.js',
-  './CA_galaxy_synchro.js',
-  './CA_pratique.js',
-  './CA_testeurs.js',
-  './CA_admin.js',
-  './CA_app.js',
+  './HE_config.js',
+  './HE_debug.js',
+  './HE_core.js',
+  './HE_offline.js',
+  './HE_qcm.js',
+  './HE_entrainement.js',
+  './HE_galaxy.js',
+  './HE_pratique.js',
+  './HE_pdf.js',
+  './HE_app.js',
 ];
 
 self.addEventListener('install', event => {

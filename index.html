@@ -1,5 +1,5 @@
 <!--
-  © 2026 BFS CACES — Jérémy Bizeul — Vigie-lance, pour BFS Prévention (Bretagne Formation Sécurité).
+  © 2026 BFS Habelec — Jérémy Bizeul — Vigie-lance, pour BFS Prévention (Bretagne Formation Sécurité).
   Tous droits réservés. Toute reproduction, distribution ou réutilisation de ce code,
   en tout ou partie, sans autorisation écrite préalable est interdite.
   Auteur : Jérémy Bizeul — Vigie-lance — https://www.bfs-prevention.fr
@@ -7,10 +7,9 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-<!-- BFS-VL-7d74c680 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>CACES® — Évaluation CACES®</title>
+<title>BFS Habelec — Évaluation NF C18-510</title>
 <meta name="theme-color" content="#f3ab12">
 <meta name="author" content="Jérémy Bizeul — Vigie-lance (pour BFS Prévention)">
 <meta name="copyright" content="© 2026 Jérémy Bizeul — Vigie-lance / BFS Prévention. Tous droits réservés.">
@@ -29,7 +28,6 @@
 <footer class="site-copyright" style="max-width:640px;margin:0 auto;padding:16px 20px 24px;text-align:center;font-size:11px;color:#464645;opacity:.7;line-height:1.5;">
   Outil mis à disposition par BFS Prévention (Bretagne Formation Sécurité) — © 2026 — Tous droits
   réservés. Copie, reproduction ou réutilisation interdites sans autorisation.
-  <br><span id="version-appli"></span>
 </footer>
 
 <!-- Bibliothèques externes (CDN) -->
@@ -41,58 +39,22 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
 <!-- Application (ordre de chargement important) -->
-<script src="CA_config.js"></script>
-<script src="CA_debug.js"></script>
-<script src="CA_core.js"></script>
-<script src="CA_drive.js"></script>
-<script src="CA_photo.js"></script>
-<script src="CA_carton.js"></script>
-<script src="CA_documents.js"></script>
-<script src="CA_engins.js"></script>
-<script src="CA_organisme.js"></script>
-<script src="CA_fise.js"></script>
-<script src="CA_horometre.js"></script>
-<script src="CA_visite.js"></script>
-<script src="CA_qcm_general.js"></script>
-<script src="CA_sessions.js"></script>
-<script src="CA_stagiaires.js"></script>
-<script src="CA_theorie.js"></script>
-<script src="CA_stagiaire.js"></script>
-<script src="CA_comptes.js"></script>
-<script src="CA_planning.js"></script>
-<script src="CA_conseil_planning.js"></script>
-<script src="CA_secretariat.js"></script>
-<script src="CA_preuve.js"></script>
-<script src="CA_recap.js"></script>
-<script src="CA_statistiques.js"></script>
-<script src="CA_conformite_cdt.js"></script>
-<script src="CA_export.js"></script>
-<script src="CA_journal.js"></script>
-<script src="CA_verification.js"></script>
-<script src="CA_parcours.js"></script>
-<script src="CA_adequation.js"></script>
-<script src="CA_non_conformite.js"></script>
-<script src="CA_tablette.js"></script>
-<script src="CA_repartition.js"></script>
-<script src="CA_galaxy.js"></script>
-<script src="CA_galaxy_envoi.js"></script>
-<script src="CA_galaxy_synchro.js"></script>
-<script src="CA_presences_galaxy.js"></script>
-<script src="CA_pratique.js"></script>
-<script src="CA_testeurs.js"></script>
-<script src="CA_qualite.js"></script>
-<script src="CA_espace_doc.js"></script>
-<script src="CA_faq.js"></script>
-<script src="CA_espace_testeur.js"></script>
-<script src="CA_tableau_bord.js"></script>
-<script src="CA_dossier_audit.js"></script>
-<script src="CA_admin.js"></script>
-<script src="CA_app.js"></script>
+<script src="HE_config.js"></script>
+<script src="HE_debug.js"></script>
+<script src="HE_core.js"></script>
+<script src="HE_offline.js"></script>
+<script src="HE_qcm.js"></script>
+<script src="HE_entrainement.js"></script>
+<script src="HE_galaxy.js"></script>
+<script src="HE_msp_ressources.js"></script>
+<script src="HE_pratique.js"></script>
+<script src="HE_pdf.js"></script>
+<script src="HE_app.js"></script>
 <script>
-document.addEventListener('DOMContentLoaded', () => { demarrer(); });
+document.addEventListener('DOMContentLoaded', () => { HorsLigne.init(); demarrer(); });
 
 // Mode hors-ligne (2026-08) : permet à l'appli de se recharger sans réseau
-// (voir sw.js). scope: './'
+// (écran pratique déjà mis en cache — voir HE_offline.js). scope: './'
 // obligatoire — plusieurs applis BFS partagent le même domaine GitHub Pages,
 // un service worker à la racine prendrait le contrôle des autres.
 if ('serviceWorker' in navigator) {
@@ -103,8 +65,9 @@ if ('serviceWorker' in navigator) {
 }
 
 console.log('%c© 2026 Jérémy Bizeul — Vigie-lance, pour BFS Prévention.', 'color:#c9a227; font-weight:bold; font-size:12px;');
-console.log('BFS CACES — outil original. Toute reproduction ou réutilisation de ce code sans autorisation écrite est interdite. Contact : https://www.bfs-prevention.fr');
+console.log('BFS Habelec — outil original. Toute reproduction ou réutilisation de ce code sans autorisation écrite est interdite. Contact : https://www.bfs-prevention.fr');
 </script>
+<!-- Réf. interne BFS-VL-58da5f9c -->
 
 </body>
 </html>
