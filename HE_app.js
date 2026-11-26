@@ -593,7 +593,7 @@ function ligneStagiaire(st, suivi, resultatsSymboles) {
     : '<span class="etat neutre">—</span>';
 
   return `<tr>
-    <td>${esc(st.nom)}</td><td>${esc(st.prenom)}</td><td>${esc(st.fonction)}</td>
+    <td class="${st.recyclage ? 'nom-recyclage' : ''}" title="${st.recyclage ? 'Recyclage' : 'Formation initiale'}">${esc(st.nom)}</td><td class="${st.recyclage ? 'nom-recyclage' : ''}" title="${st.recyclage ? 'Recyclage' : 'Formation initiale'}">${esc(st.prenom)}</td><td>${esc(st.fonction)}</td>
     <td>${symb.map(x => `<span class="puce ${x.classe}" title="${esc(LIBELLE_CLASSE_TITRE[x.classe] || 'Non évalué')}">${esc(x.libelle)}</span>`)
       .join(' ') || '<i>aucun</i>'}</td>
     <td>${(st.domaines || []).join(', ')}</td>
