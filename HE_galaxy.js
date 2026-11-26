@@ -180,3 +180,45 @@ async function ouvrirImportGalaxy() {
     });
   } catch (e) { fermerModale(); erreurSupabase('Lecture Galaxy', e); }
 }
+
+
+/* ============ Présences Galaxy (lecture seule) ============
+ * Tableau des demi-journées suivies par stagiaire (comme la fiche Galaxy), via get_presence_stagiaire.
+ * Une demi-journée est « prévue » si son créneau existe (début ≠ 00:00) ; « suivie » si Galaxy marque le stagiaire présent. */
+const heuresGalaxy = t => { const m = /^(\d+):(\d+)/.exec(String(t || '')); return m ? Number(m[1]) + Number(m[2]) / 60 : 0; };
+const formatHeures = h => { const e = Math.floor(h), mn = Math.round((h - e) * 60); return mn ? `${e} h ${String(mn).padStart(2, '0')}` : `${e} h`; };
+
+async function chargerPresencesGalaxy(zone, s, stagiaires) {
+  if (!zone) return;
+  const formationId = Number(String(s.numero_session_galaxy || '').trim());
+  if (!formationId) return;
+  zone.innerHTML = '<p class="aide">Présences Galaxy : chargement…</p>';
+  let lignes = [];
+  try { lignes = ((await galaxy('get_presence_stagiaire', { formation_id: formationId }, 1, 400)).result || []); }
+  catch (e) { zone.innerHTML = `<p class="aide">Présences Galaxy indisponibles (${esc(e.message)}).</p>`; return; }
+  if (!lignes.length) { zone.innerHTML = '<p class="aide">Présences Galaxy : aucune donnée pour cette session.</p>'; return; }
+  const jours = [...new Set(lignes.map(l => String(l.date_formation).slice(0, 10)))].sort();
+  const parId = new Map();
+  lignes.forEach(l => {
+    const id = String(l.stagiaire_id);
+    if (!parId.has(id)) parId.set(id, { nom: `${(l.nom || '').trim()} ${(l.prenom || '').trim()}`.trim(), jours: {}, heures: 0 });
+    const e = parId.get(id), jour = String(l.date_formation).slice(0, 10), present = String(l.present) === '1';
+    const prevM = String(l.debut_matin || '00:00:00') !== '00:00:00', prevA = String(l.debut_aprem || '00:00:00') !== '00:00:00';
+    e.jours[jour] = { m: prevM ? (present ? 'ok' : 'abs') : 'non', a: prevA ? (present ? 'ok' : 'abs') : 'non' };
+    if (present) e.heures += heuresGalaxy(l.duree_plage);
+  });
+  const lie = new Map((stagiaires || []).filter(x => x.galaxy_stagiaire_id).map(x => [String(x.galaxy_stagiaire_id), x]));
+  const puce = (v, lib) => `<span title="${v === 'ok' ? lib + ' suivi' : v === 'abs' ? lib + ' : absent' : lib + ' : non prévu'}" style="display:block;margin:2px auto;min-width:3.2em;padding:1px 6px;border-radius:4px;font-size:12px;`
+    + (v === 'ok' ? 'background:#2e8b57;color:#fff' : v === 'abs' ? 'background:#b2181a;color:#fff' : 'background:#eee;color:#999') + `">${lib} ${v === 'ok' ? '✓' : v === 'abs' ? '✗' : '–'}</span>`;
+  const entete = jours.map(j => `<th style="text-align:center">${esc(new Date(j + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'short' }))}<br>${esc(dateFr(j).slice(0, 5))}</th>`).join('');
+  const corps = [...parId.entries()].map(([id, e]) => {
+    const st = lie.get(id), nom = st ? `${st.nom} ${st.prenom}` : e.nom;
+    const cls = st?.recyclage ? ' class="nom-recyclage"' : '';
+    return `<tr><td${cls}><b>${esc(nom)}</b>${st ? '' : ' <span class="aide">(pas dans la liste)</span>'}</td>`
+      + jours.map(j => { const c = e.jours[j]; return `<td style="text-align:center">${c ? puce(c.m, 'M') + puce(c.a, 'A') : '—'}</td>`; }).join('')
+      + `<td style="text-align:center"><b>${formatHeures(e.heures)}</b></td></tr>`;
+  }).join('');
+  zone.innerHTML = `<details class="carte" open><summary><b>Présences Galaxy — demi-journées suivies</b></summary>
+    <table class="tableau compact"><thead><tr><th>Stagiaire</th>${entete}<th>Total présent</th></tr></thead><tbody>${corps}</tbody></table>
+    <p class="aide">Lecture seule, d'après Galaxy (M = matin, A = après-midi). Le total additionne les durées prévues des jours où le stagiaire est présent.</p></details>`;
+}
