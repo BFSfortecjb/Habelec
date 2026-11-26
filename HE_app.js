@@ -173,38 +173,75 @@ function rendreStatutEnvoiSecretariat(s) {
 }
 
 async function nouvelleSession() {
-  // N° Galaxy demandé en premier et obligatoire : c'est la référence
-  // administrative prioritaire, on redemande tant que le champ est vide.
-  let numeroGalaxy = null;
-  while (numeroGalaxy === null || numeroGalaxy.trim() === '') {
-    numeroGalaxy = prompt('N° de session Galaxy (obligatoire) :', numeroGalaxy || '');
-    if (numeroGalaxy === null) return; // annulé
-  }
-  // Préremplissage depuis Galaxy (lecture seule, jamais bloquant : en cas d'échec on saisit à la main)
-  let formGalaxy = null;
-  try { formGalaxy = await formationGalaxy(numeroGalaxy); }
-  catch (e) { toast('Galaxy injoignable (' + e.message + ') — saisie manuelle.', 'erreur', 5000); }
-  if (formGalaxy) toast('Formation trouvée dans Galaxy : ' + (formGalaxy.nom_produit || ''), 'ok', 4000);
-  const debutG = formGalaxy ? jourGalaxy(formGalaxy.date_debut) : null, finG = formGalaxy ? jourGalaxy(formGalaxy.date_fin) : null;
-  const intituleDefaut = formGalaxy
-    ? `${(formGalaxy.nom_produit || 'Habilitation électrique').replace(/®/g, '')}${debutG ? ' — ' + dateFr(debutG) : ''}`
-    : 'Habilitation électrique — ' + new Date().getFullYear();
-  const intitule = prompt('Intitulé de la session :', intituleDefaut);
-  if (!intitule) return;
-  const lieu = await demanderLieuFormation(formGalaxy ? lieuDepuisGalaxy(formGalaxy) : undefined);
-  if (lieu === null) return;
-  const code = genererCodeAcces();
-  const { error } = await sb.from('sessions_formation').insert({
-    organisme_id: S.organisme.id, formateur_id: S.profil.id,
-    intitule, numero_session_galaxy: numeroGalaxy.trim(), code_acces: code, statut: 'brouillon', lieu,
-    date_debut: debutG, date_fin: finG && finG !== debutG ? finG : null,
-    // Seuil de réussite : réglage d'organisme (2026-09-09), plus modifiable
-    // session par session — voir onglet Organisme.
-    seuil_global: S.organisme.seuil_reussite_defaut ?? 0.70,
+  // 2026-11-27 (demande de Jeremy) : un seul formulaire à deux colonnes (comme CACES), au lieu
+  // d'une suite de fenêtres de saisie. N° Galaxy obligatoire + « Récupérer depuis Galaxy » (lecture seule).
+  const { data: formateurs } = await sb.from('formateurs').select('id, nom, prenom').eq('organisme_id', S.organisme.id).order('nom');
+  const optsFormateurs = (formateurs || []).map(f =>
+    `<option value="${esc(f.id)}" ${f.id === S.profil.id ? 'selected' : ''}>${esc(((f.prenom || '') + ' ' + (f.nom || '')).trim())}</option>`).join('');
+  const auj = new Date().toISOString().slice(0, 10);
+  ouvrirModale('Nouvelle session', `
+    <form id="form-nouvelle-session" class="formulaire">
+      <div class="grille-2">
+        <label>Type de session
+          <select disabled><option>Habilitation électrique (NF C18-510)</option></select></label>
+        <div>
+          <label>N° de session Galaxy <b>(obligatoire)</b>
+            <input type="text" name="numero_galaxy" required inputmode="numeric" placeholder="Ex : 12345"></label>
+          <button type="button" id="btn-galaxy-recup" >⬇ Récupérer depuis Galaxy</button>
+          <span id="galaxy-recup-info" class="aide"></span>
+        </div>
+        <label>Intitulé <input type="text" name="intitule" required value="Habilitation électrique — ${new Date().getFullYear()}"></label>
+        <label>Entreprise (client) <input type="text" name="entreprise"></label>
+        <label>Date de début <input type="date" name="date_debut" required value="${auj}"></label>
+        <label>Date de fin <span class="aide">(si la formation dure plusieurs jours)</span>
+          <input type="date" name="date_fin"></label>
+        <label>Formateur de la session <select name="formateur_id">${optsFormateurs}</select></label>
+        <label>Lieu de la formation
+          <select name="lieu"><option value="Briec">Briec — Bretagne Formation Sécurité</option>
+            <option value="Sèvremont">Sèvremont — Bocage Formation Sécurité</option></select></label>
+      </div>
+      <fieldset><legend>Titres d'habilitation visés <span class="aide">(proposés à chaque stagiaire, à préciser ensuite stagiaire par stagiaire)</span></legend>
+        ${[['non_electrique', 'Non électrique'], ['bf_hf', 'BF / HF'], ['electrique', 'Électrique'], ['photovoltaique', 'Photovoltaïque']].map(([ordre, titre]) => {
+          const l = (S.referentiel?.symboles || []).filter(sy => sy.ordre === ordre);
+          return l.length ? `<div class="groupe-symboles"><b>${titre}</b> ${l.map(sy => `<label class="case"><input type="checkbox" name="titre_vise" value="${esc(sy.code)}"> ${esc(sy.libelle)}</label>`).join('')}</div>` : '';
+        }).join('')}
+      </fieldset>
+      <div class="pied-modale"><button type="button" onclick="fermerModale()">Annuler</button>
+        <button type="submit" class="principal">Créer la session</button></div>
+    </form>`);
+  const f = $('#form-nouvelle-session'), info = $('#galaxy-recup-info');
+  $('#btn-galaxy-recup').onclick = async () => {
+    const n = f.numero_galaxy.value.trim();
+    if (!n) { info.textContent = ' Saisis d\'abord le n° de session.'; return; }
+    info.textContent = ' Recherche…';
+    try {
+      const g = await formationGalaxy(n);
+      if (!g) { info.textContent = ' Introuvable dans Galaxy — saisie manuelle.'; return; }
+      const d1 = jourGalaxy(g.date_debut), d2 = jourGalaxy(g.date_fin);
+      f.intitule.value = `${(g.nom_produit || 'Habilitation électrique').replace(/®/g, '')}${d1 ? ' — ' + dateFr(d1) : ''}`;
+      if (d1) f.date_debut.value = d1;
+      f.date_fin.value = d2 && d2 !== d1 ? d2 : '';
+      f.lieu.value = lieuDepuisGalaxy(g);
+      info.textContent = ' Trouvée : ' + (g.nom_produit || '');
+    } catch (e) { info.textContent = ' Galaxy injoignable (' + e.message + ') — saisie manuelle.'; }
+  };
+  f.addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const code = genererCodeAcces();
+    const { error } = await sb.from('sessions_formation').insert({
+      organisme_id: S.organisme.id, formateur_id: f.formateur_id.value || S.profil.id,
+      intitule: f.intitule.value.trim(), entreprise: f.entreprise.value.trim() || null,
+      numero_session_galaxy: f.numero_galaxy.value.trim(), code_acces: code, statut: 'brouillon', lieu: f.lieu.value,
+      titres_vises: [...f.querySelectorAll('[name=titre_vise]:checked')].map(i => i.value),
+      date_debut: f.date_debut.value || auj, date_fin: f.date_fin.value && f.date_fin.value !== f.date_debut.value ? f.date_fin.value : null,
+      // Seuil de réussite : réglage d'organisme (2026-09-09), voir onglet Organisme.
+      seuil_global: S.organisme.seuil_reussite_defaut ?? 0.70,
+    });
+    if (error) return erreurSupabase('Création de la session', error);
+    fermerModale();
+    toast('Session créée — code d\'accès ' + code);
+    rendreSessions($('#contenu'));
   });
-  if (error) return erreurSupabase('Création de la session', error);
-  toast('Session créée — code d\'accès ' + code);
-  rendreSessions($('#contenu'));
 }
 
 // Lieu de la formation (Briec / Sèvremont) : détermine la marque et le
@@ -1393,7 +1430,7 @@ async function enregistrerStatutEnvoiSecretariat(sessionId, statut, detail) {
 async function nouveauStagiaire() { await editerStagiaire(null); }
 
 async function editerStagiaire(id) {
-  let st = { nom: '', prenom: '', fonction: '', affectation: '', date_naissance: null, domaines: [], symboles: [] };
+  let st = { nom: '', prenom: '', fonction: '', affectation: '', date_naissance: null, domaines: [], symboles: [...(S.session?.titres_vises || [])] };
   if (id) {
     const { data } = await sb.from('stagiaires')
       .select('*, stagiaire_symboles(symbole_code)').eq('id', id).single();

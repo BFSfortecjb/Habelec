@@ -130,7 +130,8 @@ async function ouvrirImportGalaxy() {
         for (const p of plan) {
           if (p.type === 'homonymes') continue;
           const nomG = p.i.nom.toUpperCase();
-          const titresOk = [...new Set(p.titres.filter(t => t.m).map(t => t.m.code))];
+          let titresOk = [...new Set(p.titres.filter(t => t.m).map(t => t.m.code))];
+          if (!titresOk.length) titresOk = [...(s.titres_vises || [])];   // à défaut de catégories Galaxy : titres visés de la session
           if (p.type === 'sync' || p.type === 'rattacher') {
             const maj = { galaxy_stagiaire_id: p.i.galaxy_id, galaxy_nom: nomG, galaxy_prenom: p.i.prenom };
             // le nom/prénom d'Habélec ne change que s'il n'avait pas été corrigé à la main
