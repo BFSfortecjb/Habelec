@@ -158,8 +158,9 @@ async function ouvrirImportGalaxy() {
             if (!(p.st.stagiaire_symboles || []).length && titresOk.length) {
               const { error } = await sb.from('stagiaire_symboles').insert(titresOk.map(c => ({ stagiaire_id: p.st.id, symbole_code: c })));
               if (error) throw error;
-              if (p.rec) await sb.from('stagiaires').update({ recyclage: true }).eq('id', p.st.id);
             }
+            // recyclage : passe à « recyclage » (couleur bleue) si Galaxy a un code « Rec » ; jamais remis en initial automatiquement
+            if (p.rec && !p.st.recyclage) await sb.from('stagiaires').update({ recyclage: true }).eq('id', p.st.id);
           } else if (p.type === 'nouveau') {
             msg.textContent = `Import ${++n}…`;
             const { data, error } = await sb.from('stagiaires').insert({
