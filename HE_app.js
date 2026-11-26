@@ -432,6 +432,8 @@ async function rendreDetailSession(zone) {
 
     ${tableauBordGroupe(stagiaires, resultatsParStagiaire)}
 
+    <div id="zone-presences-galaxy"></div>
+
     <div class="barre-actions">
       <h3>Stagiaires (${(stagiaires || []).length})</h3>
       <div>
@@ -465,8 +467,7 @@ async function rendreDetailSession(zone) {
         ligneStagiaire(st, suiviPar[st.id], resultatsParStagiaire[st.id] || {})).join('')
         || '<tr><td colspan="8" class="vide">Aucun stagiaire. Ajoute-les un par un ou importe un fichier Excel.</td></tr>'}
       </tbody>
-    </table>
-    <div id="zone-presences-galaxy"></div>`;
+    </table>`;
   if (s.numero_session_galaxy) chargerPresencesGalaxy($('#zone-presences-galaxy'), s, stagiaires || []);
 
   // La bibliothèque QRCode vient d'un CDN (voir index.html) : si elle n'a pas
