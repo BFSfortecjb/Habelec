@@ -25,7 +25,7 @@
 // à servir indéfiniment les anciens fichiers en cache (voir la règle
 // ci-dessus), même après un rechargement forcé (Ctrl+F5 ne contourne PAS
 // le service worker).
-const CACHE_VERSION = 'habelec-shell-v24';
+const CACHE_VERSION = 'habelec-shell-v25';
 
 const FICHIERS_APP_SHELL = [
   './',
@@ -37,6 +37,7 @@ const FICHIERS_APP_SHELL = [
   './HE_offline.js',
   './HE_qcm.js',
   './HE_entrainement.js',
+  './HE_galaxy.js',
   './HE_pratique.js',
   './HE_pdf.js',
   './HE_app.js',

@@ -180,14 +180,24 @@ async function nouvelleSession() {
     numeroGalaxy = prompt('N° de session Galaxy (obligatoire) :', numeroGalaxy || '');
     if (numeroGalaxy === null) return; // annulé
   }
-  const intitule = prompt('Intitulé de la session :', 'Habilitation électrique — ' + new Date().getFullYear());
+  // Préremplissage depuis Galaxy (lecture seule, jamais bloquant : en cas d'échec on saisit à la main)
+  let formGalaxy = null;
+  try { formGalaxy = await formationGalaxy(numeroGalaxy); }
+  catch (e) { toast('Galaxy injoignable (' + e.message + ') — saisie manuelle.', 'erreur', 5000); }
+  if (formGalaxy) toast('Formation trouvée dans Galaxy : ' + (formGalaxy.nom_produit || ''), 'ok', 4000);
+  const debutG = formGalaxy ? jourGalaxy(formGalaxy.date_debut) : null, finG = formGalaxy ? jourGalaxy(formGalaxy.date_fin) : null;
+  const intituleDefaut = formGalaxy
+    ? `${(formGalaxy.nom_produit || 'Habilitation électrique').replace(/®/g, '')}${debutG ? ' — ' + dateFr(debutG) : ''}`
+    : 'Habilitation électrique — ' + new Date().getFullYear();
+  const intitule = prompt('Intitulé de la session :', intituleDefaut);
   if (!intitule) return;
-  const lieu = await demanderLieuFormation();
+  const lieu = await demanderLieuFormation(formGalaxy ? lieuDepuisGalaxy(formGalaxy) : undefined);
   if (lieu === null) return;
   const code = genererCodeAcces();
   const { error } = await sb.from('sessions_formation').insert({
     organisme_id: S.organisme.id, formateur_id: S.profil.id,
     intitule, numero_session_galaxy: numeroGalaxy.trim(), code_acces: code, statut: 'brouillon', lieu,
+    date_debut: debutG, date_fin: finG && finG !== debutG ? finG : null,
     // Seuil de réussite : réglage d'organisme (2026-09-09), plus modifiable
     // session par session — voir onglet Organisme.
     seuil_global: S.organisme.seuil_reussite_defaut ?? 0.70,
@@ -311,6 +321,7 @@ async function rendreDetailSession(zone) {
       <div>
         <button onclick="ouvrirParametresSession()" title="Paramètres de l'évaluation">⚙ Paramètres</button>
         <button onclick="genererTousLesQcm()" title="Générer un sujet par stagiaire">🎲 Générer les QCM</button>
+        ${s.statut !== 'cloturee' ? `<button onclick="ouvrirImportGalaxy()" title="Importer / synchroniser les inscrits depuis Galaxy (sens unique, rien n'est supprimé)">⇄ Galaxy</button>` : ''}
         <button onclick="voirJournalSession('${s.id}')" title="Historique des interventions manuelles du formateur">🗂 Journal</button>
         ${s.statut !== 'cloturee' ? `<button class="principal" onclick="basculerOuverture()">
           ${s.statut === 'ouverte' ? '⏸ Fermer l\'accès stagiaires' : '▶ Ouvrir l\'accès stagiaires'}</button>` : ''}
